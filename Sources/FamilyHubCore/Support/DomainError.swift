@@ -24,6 +24,18 @@ public enum DomainError: Error, Equatable, Sendable {
     /// A number fell outside its permitted range.
     case outOfRange(field: Field, allowed: ClosedRange<Int>)
 
+    // MARK: Membership
+
+    /// The referenced member is not part of this household.
+    case memberNotInHousehold(Member.ID)
+
+    /// The household has no remaining seats on its current plan.
+    case householdFull(limit: Int)
+
+    /// Removing this member would leave the household with no adult, locking
+    /// everyone out of settings, billing, and approvals.
+    case wouldLeaveHouseholdWithoutAdult
+
     // MARK: Lookup
 
     /// The requested record does not exist, most often because another family
@@ -59,6 +71,12 @@ extension DomainError: LocalizedError {
             return "\(field.label) is too long. Keep it under \(limit) characters."
         case .outOfRange(let field, let allowed):
             return "\(field.label) must be between \(allowed.lowerBound) and \(allowed.upperBound)."
+        case .memberNotInHousehold:
+            return "That person isn't in this household anymore."
+        case .householdFull(let limit):
+            return "This household is full at \(limit) members. Upgrade to add more."
+        case .wouldLeaveHouseholdWithoutAdult:
+            return "Every household needs at least one adult. Make someone else an adult first."
         case .notFound(let entity, _):
             return "That \(entity.lowercased()) no longer exists."
         }
