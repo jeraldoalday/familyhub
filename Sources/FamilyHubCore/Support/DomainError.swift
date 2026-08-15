@@ -36,6 +36,12 @@ public enum DomainError: Error, Equatable, Sendable {
     /// everyone out of settings, billing, and approvals.
     case wouldLeaveHouseholdWithoutAdult
 
+    // MARK: Scheduling
+
+    /// A recurrence rule was described in a way that can never produce a date,
+    /// such as a weekly rule with no weekdays selected.
+    case unsatisfiableRecurrence(reason: String)
+
     // MARK: Lookup
 
     /// The requested record does not exist, most often because another family
@@ -77,6 +83,8 @@ extension DomainError: LocalizedError {
             return "This household is full at \(limit) members. Upgrade to add more."
         case .wouldLeaveHouseholdWithoutAdult:
             return "Every household needs at least one adult. Make someone else an adult first."
+        case .unsatisfiableRecurrence(let reason):
+            return "This chore would never come up: \(reason)."
         case .notFound(let entity, _):
             return "That \(entity.lowercased()) no longer exists."
         }
