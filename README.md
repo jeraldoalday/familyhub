@@ -42,9 +42,15 @@ an adapter change, not a rewrite.
 The domain and store layers build and test with nothing but the Swift toolchain:
 
 ```bash
-swift build
-swift test
+make check      # build + test — the pre-commit gate
+make test       # 208 tests, ~15ms
+make lint       # swift-format lint
 ```
+
+Use `make` rather than `swift test` directly when Xcode is not installed: Swift
+Testing ships as a framework outside the default search path on a Command Line
+Tools-only machine, and the Makefile supplies the flags to find it. With Xcode
+present the Makefile gets out of the way and `swift test` works as normal.
 
 The app itself requires Xcode, because the SwiftData `@Model` macro and SwiftUI
 previews are provided by the Xcode toolchain rather than the Command Line Tools:
@@ -58,13 +64,33 @@ open FamilyHub.xcodeproj   # added in Milestone 2 — see docs/ROADMAP.md
 ```
 Sources/
   FamilyHubCore/       Domain models, scheduling, rules — pure Swift
-  FamilyHubStore/      Repository protocols + in-memory implementation
+  FamilyHubStore/      Store contract, in-memory store, commands, demo data
 Tests/
   FamilyHubCoreTests/  Business-rule tests
-  FamilyHubStoreTests/ Repository conformance tests
-App/                   SwiftUI + SwiftData layer (opened in Xcode)
-docs/                  Roadmap, architecture notes, decision records
+  FamilyHubStoreTests/ Store and command tests
+docs/
+  ARCHITECTURE.md      Why the layering is what it is
+  ROADMAP.md           The plan to production
 ```
+
+## What is built
+
+| Area | Status |
+|---|---|
+| Households, members, roles, permissions | ✅ complete, tested |
+| Chores, rotation, skipping, archiving | ✅ complete, tested |
+| Recurrence engine (daily / weekly / monthly) | ✅ complete, tested |
+| Completions, approval queue, conflict resolution | ✅ complete, tested |
+| Points ledger, rewards, redemption rules | ✅ complete, tested |
+| Shopping lists with aisle grouping | ✅ complete, tested |
+| Command layer over the store | ✅ complete, tested |
+| SwiftData persistence | ⬜ needs Xcode — Milestone 1 |
+| SwiftUI app | ⬜ needs Xcode — Milestone 1 |
+| Notifications, widgets, StoreKit | ⬜ Milestones 2–3 |
+
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the sequencing and
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for why the layers are drawn
+where they are.
 
 ## License
 
