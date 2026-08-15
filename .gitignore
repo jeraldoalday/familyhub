@@ -1,0 +1,59 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Xcode
+DerivedData/
+build/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xcuserstate
+*.xcscmblueprint
+*.moved-aside
+xcuserdata/
+
+# Xcode build products
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Provisioning and signing — never commit these
+*.mobileprovision
+*.provisionprofile
+*.p12
+*.cer
+*.certSigningRequest
+
+# Secrets / local configuration
+Secrets.xcconfig
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*~
+
+# Tooling output
+*.log
+coverage/
+*.profraw
+*.profdata
+fastlane/report.xml
+fastlane/screenshots/**/*.png
+fastlane/test_output/
