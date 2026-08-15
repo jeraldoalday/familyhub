@@ -113,9 +113,13 @@ public struct PointsLedger: Sendable {
 
     /// Members ranked by points earned, highest first.
     ///
-    /// - Parameter members: The household's members. Anyone with no entries is
-    ///   included on zero rather than omitted, because a child who has not
-    ///   started yet still needs to see themselves on the board.
+    /// - Parameters:
+    ///   - members: The household's members. Anyone with no entries is included
+    ///     on zero rather than omitted, because a child who has not started yet
+    ///     still needs to see themselves on the board.
+    ///   - range: When supplied, scores only entries inside it — the weekly and
+    ///     monthly boards. Omitting it ranks on all time.
+    /// - Returns: Rows ordered highest first, each carrying its rank.
     public func standings(
         among members: some Collection<Member>,
         in range: ClosedRange<Date>? = nil
@@ -134,7 +138,8 @@ public struct PointsLedger: Sendable {
             )
         }
 
-        return scored
+        return
+            scored
             .sorted { lhs, rhs in
                 if lhs.pointsEarned != rhs.pointsEarned {
                     return lhs.pointsEarned > rhs.pointsEarned

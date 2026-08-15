@@ -128,6 +128,7 @@ public actor InMemoryHouseholdStore: HouseholdStore {
     /// land without reaching into private state.
     public var recordCount: Int {
         householdsByID.count + membersByID.count + choresByID.count + completionsByID.count
-            + ledgerEntriesByID.count + rewardsByID.count + shoppingListsByID.count + shoppingItemsByID.count
+            + ledgerEntriesByID.count + rewardsByID.count + shoppingListsByID.count
+            + shoppingItemsByID.count
     }
 }

@@ -122,7 +122,8 @@ extension DomainError: LocalizedError {
         case .notPermitted(let action, let role):
             return "\(role.label)s can't \(action.label)."
         case .insufficientPoints(let balance, let required):
-            return "That costs \(required) points and you have \(balance). \(required - balance) to go!"
+            return
+                "That costs \(required) points and you have \(balance). \(required - balance) to go!"
         case .rewardUnavailable(let reason):
             return "That reward isn't available right now — \(reason)."
         case .unsatisfiableRecurrence(let reason):

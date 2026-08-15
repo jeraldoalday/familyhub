@@ -22,8 +22,10 @@ public struct HouseholdCommands: Sendable {
 
     /// Creates a command layer over a store.
     ///
-    /// - Parameter dateProvider: Injected so tests can drive time. Defaults to
-    ///   the system clock.
+    /// - Parameters:
+    ///   - store: Where records are read from and written to.
+    ///   - dateProvider: Injected so tests can drive time. Defaults to the
+    ///     system clock.
     public init(store: any HouseholdStore, dateProvider: any DateProvider = SystemDateProvider()) {
         self.store = store
         self.dateProvider = dateProvider

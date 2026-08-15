@@ -55,9 +55,10 @@ struct RecurrenceEngineTests {
             startingOn: date(2026, 3, 2),
             in: date(2026, 3, 2)...date(2026, 3, 6)
         )
-        #expect(days(result) == [
-            "2026-03-02", "2026-03-03", "2026-03-04", "2026-03-05", "2026-03-06",
-        ])
+        #expect(
+            days(result) == [
+                "2026-03-02", "2026-03-03", "2026-03-04", "2026-03-05", "2026-03-06",
+            ])
     }
 
     @Test("Every-N-days keeps its phase from the start date")
@@ -103,12 +104,13 @@ struct RecurrenceEngineTests {
             startingOn: date(2026, 3, 2),
             in: date(2026, 3, 2)...date(2026, 3, 15)
         )
-        #expect(days(result) == [
-            "2026-03-02",  // Mon
-            "2026-03-05",  // Thu
-            "2026-03-09",  // Mon
-            "2026-03-12",  // Thu
-        ])
+        #expect(
+            days(result) == [
+                "2026-03-02",  // Mon
+                "2026-03-05",  // Thu
+                "2026-03-09",  // Mon
+                "2026-03-12",  // Thu
+            ])
     }
 
     @Test("Weekly emits days in the order they occur in the week")
@@ -362,8 +364,10 @@ struct RecurrenceEngineTests {
 
         let mondayEngine = RecurrenceEngine(calendar: calendar)
         let sundayEngine = RecurrenceEngine(calendar: sundayFirst)
-        let fromMonday = mondayEngine.occurrences(of: rule, startingOn: date(2026, 3, 2), in: window)
-        let fromSunday = sundayEngine.occurrences(of: rule, startingOn: date(2026, 3, 2), in: window)
+        let fromMonday = mondayEngine.occurrences(
+            of: rule, startingOn: date(2026, 3, 2), in: window)
+        let fromSunday = sundayEngine.occurrences(
+            of: rule, startingOn: date(2026, 3, 2), in: window)
         #expect(days(fromMonday) == days(fromSunday))
     }
 }

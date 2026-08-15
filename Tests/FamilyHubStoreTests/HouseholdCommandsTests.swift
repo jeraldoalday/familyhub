@@ -10,7 +10,8 @@ struct HouseholdCommandsTests {
     // MARK: Fixture
 
     private let calendar = Calendar.testDefault
-    private let clock = FixedDateProvider(year: 2026, month: 3, day: 2, hour: 9, calendar: .testDefault)
+    private let clock = FixedDateProvider(
+        year: 2026, month: 3, day: 2, hour: 9, calendar: .testDefault)
 
     private struct Fixture {
         let store: InMemoryHouseholdStore
@@ -144,7 +145,8 @@ struct HouseholdCommandsTests {
             to: f.household.id, name: "Alex", role: .child, by: f.parent.id
         )
 
-        await #expect(throws: DomainError.notPermitted(action: .completeOthersChore, role: .child)) {
+        await #expect(throws: DomainError.notPermitted(action: .completeOthersChore, role: .child))
+        {
             try await f.commands.completeChore(
                 f.chore.id, on: clock.today, in: f.household.id, by: sibling.id
             )

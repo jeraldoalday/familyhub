@@ -75,7 +75,8 @@ public enum Permissions {
         from members: some Collection<Member>
     ) throws {
         guard member.role.isAdult else { return }
-        let remainingAdults = members
+        let remainingAdults =
+            members
             .filter { $0.id != member.id && $0.isActive && $0.role.isAdult }
         guard !remainingAdults.isEmpty else {
             throw DomainError.wouldLeaveHouseholdWithoutAdult

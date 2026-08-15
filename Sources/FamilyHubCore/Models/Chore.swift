@@ -134,7 +134,7 @@ extension Chore {
             switch self {
             case .anyone: false
             case .member, .rotating: true
-                }
+            }
         }
     }
 

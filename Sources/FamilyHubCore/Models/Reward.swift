@@ -68,7 +68,8 @@ public struct Reward: Entity {
             limit: Limits.choreTitleLength
         )
         self.cost = try cost.validated(in: Limits.pointsPerReward, field: .points)
-        self.emoji = emoji
+        self.emoji =
+            emoji
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .flatMap(\.first)
             .map(String.init)
@@ -113,6 +114,7 @@ extension Reward {
     ///   - lastRedemption: When this member last redeemed *this* reward.
     ///   - date: The current moment.
     ///   - calendar: The household calendar.
+    /// - Returns: Why the reward can or cannot be redeemed right now.
     public func availability(
         forBalance balance: Int,
         lastRedemption: Date?,

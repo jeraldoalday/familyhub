@@ -179,6 +179,7 @@ extension HouseholdSnapshot {
     ///   - day: The day of interest.
     ///   - memberID: When supplied, limits the agenda to that person's chores
     ///     plus the unassigned ones anybody can pick up.
+    /// - Returns: Rows with outstanding work first, then finished work.
     public func agenda(
         for day: Date,
         memberID: Identifier<Member>? = nil

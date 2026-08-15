@@ -75,9 +75,16 @@ public struct RecurrenceEngine: Sendable {
     /// out — reached its end date, exhausted its occurrence limit, or was a
     /// one-off that has already happened.
     ///
-    /// - Parameter searchLimit: How far ahead to look before concluding there
-    ///   is no next occurrence. Ten years comfortably covers a fortnightly
-    ///   chore that was skipped for a season.
+    /// - Parameters:
+    ///   - rule: The recurrence to expand.
+    ///   - start: The chore's start date. Occurrences never precede it.
+    ///   - date: The day to search forward from.
+    ///   - exceptions: Days the family explicitly skipped.
+    ///   - searchLimit: How far ahead to look before concluding there is no
+    ///     next occurrence. Ten years comfortably covers a fortnightly chore
+    ///     that was skipped for a season.
+    /// - Returns: The next start-of-day occurrence, or `nil` if the rule is
+    ///   exhausted.
     public func nextOccurrence(
         of rule: RecurrenceRule,
         startingOn start: Date,

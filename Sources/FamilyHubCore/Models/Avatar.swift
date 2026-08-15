@@ -15,11 +15,14 @@ public struct Avatar: Hashable, Sendable, Codable {
 
     /// Creates an avatar.
     ///
-    /// - Parameter emoji: Trimmed to a single grapheme cluster if supplied, so
-    ///   a pasted string can never blow out the layout of an avatar circle.
+    /// - Parameters:
+    ///   - color: The palette entry shown behind the initials or emoji.
+    ///   - emoji: Trimmed to a single grapheme cluster if supplied, so a pasted
+    ///     string can never blow out the layout of an avatar circle.
     public init(color: AvatarColor, emoji: String? = nil) {
         self.color = color
-        self.emoji = emoji
+        self.emoji =
+            emoji
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .flatMap(\.first)
             .map(String.init)

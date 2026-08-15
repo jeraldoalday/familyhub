@@ -51,7 +51,8 @@ public struct ShoppingList: Entity {
         self.id = id
         self.householdID = householdID
         self.name = try ValidatedText(name, field: .listName, limit: Limits.choreTitleLength)
-        self.emoji = emoji
+        self.emoji =
+            emoji
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .flatMap(\.first)
             .map(String.init)
@@ -323,7 +324,8 @@ extension Collection where Element == ShoppingItem {
     /// "Milk" bumps the quantity instead of producing two rows that the person
     /// in the shop has to reconcile.
     public func pendingMatch(for name: String) -> ShoppingItem? {
-        let key = name
+        let key =
+            name
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
         guard !key.isEmpty else { return nil }

@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push to a branch makes the previous run's answer irrelevant, so cancel
+# it rather than paying for a result nobody will read.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Runners ship several Xcode versions; pinning keeps a toolchain update
+      # from turning into a mystery failure on an unrelated pull request.
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode_16.app
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Cache build products
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          restore-keys: ${{ runner.os }}-spm-
+
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Test
+        run: swift test --skip-build
+
+      # Release builds enable optimisations that surface warnings a debug build
+      # hides, and it is the configuration the App Store actually receives.
+      - name: Build release
+        run: swift build -c release
+
+  format:
+    name: Format check
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode_16.app
+
+      # Reports rather than rewrites, so a formatting nit never silently
+      # rewrites a contributor's branch.
+      - name: Check formatting
+        run: swift format lint --recursive --strict Sources Tests

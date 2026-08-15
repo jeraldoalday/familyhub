@@ -203,11 +203,13 @@ extension RecurrenceRule {
             }
             return "Every \(interval) weeks on \(days)"
         case .monthly:
-            let days = daysOfMonth
+            let days =
+                daysOfMonth
                 .sorted()
                 .map { $0 == Self.lastDayOfMonth ? "last day" : $0.ordinalDescription }
                 .joined(separator: ", ")
-            return interval == 1 ? "Monthly on the \(days)" : "Every \(interval) months on the \(days)"
+            return interval == 1
+                ? "Monthly on the \(days)" : "Every \(interval) months on the \(days)"
         }
     }
 
