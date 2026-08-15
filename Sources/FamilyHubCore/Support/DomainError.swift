@@ -36,6 +36,19 @@ public enum DomainError: Error, Equatable, Sendable {
     /// everyone out of settings, billing, and approvals.
     case wouldLeaveHouseholdWithoutAdult
 
+    // MARK: Permissions
+
+    /// The member's role does not permit this action.
+    case notPermitted(action: Action, role: MemberRole)
+
+    // MARK: Points and rewards
+
+    /// A redemption was attempted with an insufficient balance.
+    case insufficientPoints(balance: Int, required: Int)
+
+    /// The reward is not available to redeem right now.
+    case rewardUnavailable(reason: String)
+
     // MARK: Scheduling
 
     /// A recurrence rule was described in a way that can never produce a date,
@@ -43,6 +56,10 @@ public enum DomainError: Error, Equatable, Sendable {
     case unsatisfiableRecurrence(reason: String)
 
     // MARK: Lookup
+
+    /// The occurrence has already been completed. Completing twice would pay
+    /// the points out twice.
+    case alreadyCompleted
 
     /// The requested record does not exist, most often because another family
     /// member deleted it while this device was still showing it.
@@ -64,6 +81,25 @@ extension DomainError {
         case points
         case quantity
     }
+
+    /// A guarded operation, named so that permission checks and the messages
+    /// they produce cannot drift apart.
+    public enum Action: String, Codable, Equatable, Sendable, CaseIterable {
+        case manageHousehold
+        case inviteMember
+        case removeMember
+        case createChore
+        case assignChore
+        case completeOwnChore
+        case completeOthersChore
+        case approveCompletion
+        case adjustPoints
+        case createReward
+        case redeemReward
+        case manageShoppingList
+        case manageMealPlan
+        case manageCalendar
+    }
 }
 
 extension DomainError: LocalizedError {
@@ -83,8 +119,16 @@ extension DomainError: LocalizedError {
             return "This household is full at \(limit) members. Upgrade to add more."
         case .wouldLeaveHouseholdWithoutAdult:
             return "Every household needs at least one adult. Make someone else an adult first."
+        case .notPermitted(let action, let role):
+            return "\(role.label)s can't \(action.label)."
+        case .insufficientPoints(let balance, let required):
+            return "That costs \(required) points and you have \(balance). \(required - balance) to go!"
+        case .rewardUnavailable(let reason):
+            return "That reward isn't available right now — \(reason)."
         case .unsatisfiableRecurrence(let reason):
             return "This chore would never come up: \(reason)."
+        case .alreadyCompleted:
+            return "This one's already done."
         case .notFound(let entity, _):
             return "That \(entity.lowercased()) no longer exists."
         }
@@ -105,6 +149,29 @@ extension DomainError.Field {
         case .eventTitle: "Event title"
         case .points: "Points"
         case .quantity: "Quantity"
+        }
+    }
+}
+
+extension DomainError.Action {
+    /// The action as a verb phrase, so it reads correctly inside the sentence
+    /// "Children can't …".
+    public var label: String {
+        switch self {
+        case .manageHousehold: "change household settings"
+        case .inviteMember: "invite people"
+        case .removeMember: "remove people"
+        case .createChore: "create chores"
+        case .assignChore: "assign chores"
+        case .completeOwnChore: "complete their own chores"
+        case .completeOthersChore: "complete someone else's chore"
+        case .approveCompletion: "approve completed chores"
+        case .adjustPoints: "change points"
+        case .createReward: "create rewards"
+        case .redeemReward: "redeem rewards"
+        case .manageShoppingList: "change shopping lists"
+        case .manageMealPlan: "change the meal plan"
+        case .manageCalendar: "change the calendar"
         }
     }
 }
