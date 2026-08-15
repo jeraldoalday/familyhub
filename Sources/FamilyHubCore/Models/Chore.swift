@@ -274,12 +274,17 @@ extension Chore {
     /// silently made to do it again.
     public func occurrenceIndex(of date: Date, using engine: RecurrenceEngine) -> Int? {
         let target = engine.calendar.startOfDay(for: date)
-        guard target >= engine.calendar.startOfDay(for: startDate) else { return nil }
+        // Both bounds are normalised. Comparing a normalised target against a
+        // raw start date would invert the range for any chore created later in
+        // the day than midnight — which is every chore a person actually
+        // creates — and constructing an inverted ClosedRange traps.
+        let firstDay = engine.calendar.startOfDay(for: startDate)
+        guard target >= firstDay else { return nil }
 
         let all = engine.occurrences(
             of: recurrence,
-            startingOn: startDate,
-            in: startDate...target,
+            startingOn: firstDay,
+            in: firstDay...target,
             maximum: Int.max
         )
         guard let position = all.lastIndex(of: target) else { return nil }

@@ -47,7 +47,12 @@ public struct Member: Entity {
         householdID: Identifier<Household>,
         name: String,
         role: MemberRole,
-        avatar: Avatar = .random(),
+        // Deliberately a fixed colour rather than `Avatar.random()`. A random
+        // default makes constructing a member nondeterministic, which means a
+        // test or a preview cannot be reproduced and a synced record differs
+        // from the one that produced it. Callers that want members to look
+        // distinct use `Avatar.distinct(from:)`, which the command layer does.
+        avatar: Avatar = Avatar(color: .blue),
         birthday: Date? = nil,
         joinedAt: Date,
         removedAt: Date? = nil

@@ -189,6 +189,19 @@ struct ChoreTests {
         #expect(chore.occurrenceIndex(of: date(2026, 3, 1), using: engine) == nil)
     }
 
+    @Test("A chore created partway through the day still indexes its first day")
+    func indexHandlesNonMidnightStart() throws {
+        // Every chore a person actually creates has a start date somewhere in
+        // the middle of the day. Comparing a normalised target against a raw
+        // start date inverts the search range and traps.
+        let morning = FixedDateProvider(
+            year: 2026, month: 3, day: 2, hour: 9, calendar: calendar
+        ).now
+        let chore = try makeChore(start: morning)
+        #expect(chore.occurrenceIndex(of: date(2026, 3, 2), using: engine) == 0)
+        #expect(chore.occurrenceIndex(of: date(2026, 3, 4), using: engine) == 2)
+    }
+
     @Test("A date the chore does not fall on has no occurrence index")
     func indexOffScheduleIsNil() throws {
         let chore = try makeChore(recurrence: try .weekly(on: [.monday]))

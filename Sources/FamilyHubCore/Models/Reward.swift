@@ -83,13 +83,27 @@ public struct Reward: Entity {
 // MARK: - Availability
 
 extension Reward {
-    /// Whether the reward is offered to a given member at all, ignoring their
-    /// balance. A reward they are not eligible for is hidden entirely rather
-    /// than shown as unaffordable.
+    /// Whether this reward is meant for `memberID` at all.
+    ///
+    /// Strictly a question about *who*, not about stock, cooldown, or whether
+    /// a parent has switched it off. Those are reported separately by
+    /// ``availability(forBalance:lastRedemption:on:calendar:)`` so that a
+    /// sold-out reward says it is sold out rather than telling a child it was
+    /// never theirs to want.
+    public func isEligible(_ memberID: Identifier<Member>) -> Bool {
+        eligibleMemberIDs.isEmpty || eligibleMemberIDs.contains(memberID)
+    }
+
+    /// Whether the reward should appear on `memberID`'s rewards screen.
+    ///
+    /// Combines eligibility with availability, because a reward that is not
+    /// theirs, is sold out, or has been withdrawn is hidden entirely — showing
+    /// it greyed out just invites the question. Affordability is deliberately
+    /// excluded: a reward a child cannot yet afford is precisely the one worth
+    /// showing them, with the shortfall attached.
     public func isOffered(to memberID: Identifier<Member>) -> Bool {
-        guard isActive else { return false }
-        guard (remainingRedemptions ?? 1) > 0 else { return false }
-        return eligibleMemberIDs.isEmpty || eligibleMemberIDs.contains(memberID)
+        guard isActive, isEligible(memberID) else { return false }
+        return (remainingRedemptions ?? 1) > 0
     }
 
     /// Whether `memberID` may redeem this reward right now.
