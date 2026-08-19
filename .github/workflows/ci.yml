@@ -27,12 +27,21 @@ jobs:
       - name: Show toolchain
         run: swift --version
 
+      # The key carries the commit so a fresh cache is written on every run.
+      # Keyed on the manifest alone it would never change, and actions/cache
+      # skips the save entirely on a hit — so the very first .build produced by
+      # a given manifest would be restored forever, going staler every commit
+      # until most of the package was being rebuilt anyway. The restore-keys
+      # fall back to the newest cache for this manifest, then to any at all.
       - name: Cache build products
         uses: actions/cache@v4
         with:
           path: .build
-          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift', 'Package.resolved') }}
-          restore-keys: ${{ runner.os }}-spm-
+          key: >-
+            ${{ runner.os }}-spm-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-spm-${{ hashFiles('Package.swift', 'Package.resolved') }}-
+            ${{ runner.os }}-spm-
 
       - name: Build
         run: swift build --build-tests
