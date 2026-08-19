@@ -37,23 +37,24 @@ release: ## Build with optimisations, as the app target will
 	swift build -c release
 
 .PHONY: check
-check: build test ## Build and test — the pre-commit gate
+check: build test lint ## Build, test, and lint — the pre-commit gate
 
 .PHONY: clean
 clean: ## Remove build artefacts
 	rm -rf .build
 
+# The exact command CI runs. Anything else here — a differently configured
+# linter, a laxer flag set — means a branch can pass locally and fail on push,
+# which teaches people to stop trusting the local gate.
+SWIFT_FORMAT := swift format
+
 .PHONY: lint
-lint: ## Run SwiftLint if it is installed
-	@command -v swiftlint >/dev/null 2>&1 \
-		&& swiftlint lint --quiet \
-		|| echo "swiftlint not installed — skipping (brew install swiftlint)"
+lint: ## Check formatting, exactly as CI does
+	$(SWIFT_FORMAT) lint --recursive --strict Sources Tests
 
 .PHONY: format
-format: ## Format sources with swift-format if it is installed
-	@command -v swift-format >/dev/null 2>&1 \
-		&& swift-format format --in-place --recursive Sources Tests \
-		|| echo "swift-format not installed — skipping"
+format: ## Reformat sources in place
+	$(SWIFT_FORMAT) format --in-place --recursive Sources Tests
 
 .PHONY: help
 help: ## List available targets

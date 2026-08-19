@@ -42,9 +42,10 @@ an adapter change, not a rewrite.
 The domain and store layers build and test with nothing but the Swift toolchain:
 
 ```bash
-make check      # build + test — the pre-commit gate
-make test       # 208 tests, ~15ms
-make lint       # swift-format lint
+make check      # build + test + lint — the pre-commit gate
+make test       # 344 tests
+make format     # reformat in place
+make lint       # the exact formatting check CI runs
 ```
 
 Use `make` rather than `swift test` directly when Xcode is not installed: Swift
