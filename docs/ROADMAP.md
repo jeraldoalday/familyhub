@@ -4,10 +4,17 @@ Two weeks, from a tested domain core to something submittable to App Review.
 
 ## Where things stand
 
-**Day 1 is done.** The domain and store layers are complete and tested: 208
-tests covering recurrence, chore rotation, permissions, the points ledger,
-shopping lists, and the command layer that ties them together. `make check`
-builds and tests in under a second.
+**Day 1 is done, and then some.** The domain and store layers are complete and
+tested: 344 tests covering recurrence, chore rotation, permissions, the points
+ledger, shopping lists, streaks, the weekly recap, workload fairness, reminder
+planning, the command layer, the change feed, and the backup format. `make
+check` builds, tests, and lints in a few seconds.
+
+Some of that was pulled forward out of later days on purpose. Streaks,
+reminders, and the recap are all decisions about *what the app should say*, and
+deciding those against a test suite is faster and considerably more honest than
+deciding them against a running build at seven in the evening. What they leave
+for their own days is wiring rather than judgement.
 
 What does **not** exist yet is the app itself. That is deliberate — the
 business rules were worth getting right first, because they are the part that
@@ -61,9 +68,12 @@ logic that leaked into a view and belongs in `FamilyHubCore`. This day pulls
 that back. It will be net-negative on lines and is not optional: it is far
 cheaper now than after notifications and widgets depend on the mess.
 
-**Day 7 — notifications.** Local reminders for chores due today, approvals
-waiting on a parent, and a nudge when a streak is about to break. All derived
-from the recurrence engine, which already knows every future occurrence.
+**Day 7 — notifications.** `ReminderPlanner` already decides what is worth
+saying and when: the morning digest, the approval queue, the streak about to
+break, and the per-person daily cap that keeps the channel from being switched
+off. What is left is the platform half — authorisation, translating each
+`Reminder` into a `UNNotificationRequest`, and re-planning on launch and on
+change. Smaller than it was.
 
 **Day 8 — widgets and Shortcuts.** A home-screen widget for today's chores and
 a Lock Screen widget for the point balance. App Intents for "add to the
@@ -76,9 +86,12 @@ to the accessibility sizes, contrast checks, reduced-motion honoured. Mostly
 auditing and fixing; a small diff and a genuinely non-optional day. An app a
 child with low vision cannot use is not finished.
 
-**Day 10 — performance and edge cases.** Profile the agenda against a household
-with two years of history. Empty states, error states, and the offline paths.
-Fix what Instruments finds.
+**Day 10 — performance and edge cases.** The agenda, the recap, and the streak
+calculator have already been profiled against a household with two years of
+history and share one walk of each chore's schedule; `HotPathTests` keeps them
+that way. What is left for this day is the part that needs a running app —
+scroll performance, image and layout cost, empty states, error states, and the
+offline paths.
 
 **Day 11 — monetisation.** StoreKit 2 for FamilyHub Plus, the paywall, and
 restore-purchases. The tier limits are already enforced in the domain, so this
@@ -86,7 +99,9 @@ is the purchase flow rather than a re-plumbing.
 
 **Day 12 — App Store preparation.** Icon, screenshots (from `DemoHousehold`,
 which is deterministic precisely so these reproduce), description, keywords,
-privacy nutrition label, and the support page App Review requires.
+privacy nutrition label, and the support page App Review requires. The data
+export the privacy label has to describe already exists as `HouseholdArchive`,
+so the label describes something real rather than something promised.
 
 ## Milestone 4 — release (days 13–14)
 
@@ -99,10 +114,12 @@ the day for fixing what they hit; something always surfaces.
 
 Cutting these is what makes the rest fit:
 
-- **iCloud sync.** Chosen against for v1. The store abstraction and the
-  append-only ledger are built so it can be added without touching business
-  logic, but sync brings conflict resolution, account states, and a support
-  burden that does not fit two weeks.
+- **iCloud sync.** Chosen against for v1. The store abstraction, the
+  append-only ledger, and now the change feed are built so it can be added
+  without touching business logic, but sync brings account states, an
+  invitation flow, and a support burden that does not fit two weeks. What a
+  family can have today is a backup file they carry across themselves, which
+  covers the new-phone case without covering the two-phones-at-once one.
 - **Meal planning.** Modelled in the category enum, not built. It is a
   reasonable 1.1.
 - **A family calendar.** Overlaps heavily with the system Calendar app; needs

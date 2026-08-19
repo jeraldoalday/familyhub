@@ -4,8 +4,9 @@ A shared organizer for the whole household: chores that rotate fairly, a points
 and rewards system that actually motivates kids, shopping lists everyone can add
 to, meal planning, and a family calendar — all in one native iOS/iPadOS app.
 
-> **Status:** in active development. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for
-> the shipping plan.
+> **Status:** in active development. The domain and store layers are complete
+> and tested; the app itself is the remaining work. See
+> [`docs/ROADMAP.md`](docs/ROADMAP.md) for the shipping plan.
 
 ---
 
@@ -64,11 +65,16 @@ open FamilyHub.xcodeproj   # added in Milestone 2 — see docs/ROADMAP.md
 
 ```
 Sources/
-  FamilyHubCore/       Domain models, scheduling, rules — pure Swift
-  FamilyHubStore/      Store contract, in-memory store, commands, demo data
+  FamilyHubCore/
+    Models/            Households, members, chores, completions, rewards, lists
+    Scheduling/        Recurrence engine, weekdays, reminder planning
+    Rules/             Permissions, points ledger, streaks, insights
+    Support/           Identifiers, validation, errors, the injected clock
+  FamilyHubStore/      Store contract, in-memory store, commands, change feed,
+                       backup format, demo data
 Tests/
-  FamilyHubCoreTests/  Business-rule tests
-  FamilyHubStoreTests/ Store and command tests
+  FamilyHubCoreTests/  Business-rule tests, plus hot-path guards
+  FamilyHubStoreTests/ Store, command, observation, and backup tests
 docs/
   ARCHITECTURE.md      Why the layering is what it is
   ROADMAP.md           The plan to production
@@ -84,7 +90,12 @@ docs/
 | Completions, approval queue, conflict resolution | ✅ complete, tested |
 | Points ledger, rewards, redemption rules | ✅ complete, tested |
 | Shopping lists with aisle grouping | ✅ complete, tested |
+| Streaks, per chore and per member | ✅ complete, tested |
+| Weekly recap and workload fairness | ✅ complete, tested |
+| Reminder planning (what to say, and when) | ✅ complete, tested |
 | Command layer over the store | ✅ complete, tested |
+| Change feed and snapshot observation | ✅ complete, tested |
+| Backup, restore, and data export | ✅ complete, tested |
 | SwiftData persistence | ⬜ needs Xcode — Milestone 1 |
 | SwiftUI app | ⬜ needs Xcode — Milestone 1 |
 | Notifications, widgets, StoreKit | ⬜ Milestones 2–3 |
