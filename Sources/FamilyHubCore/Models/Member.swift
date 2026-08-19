@@ -107,11 +107,29 @@ extension Member {
 
     /// Whether today is this member's birthday, for the celebratory banner on
     /// the home screen.
+    ///
+    /// A birthday on 29 February falls on the last day of that month in the
+    /// three years out of four that do not have one. The alternative — matching
+    /// the month and day exactly — gives a leap-year child a birthday every
+    /// fourth year, which is a charming joke exactly once and then is a bug
+    /// report from a seven year old.
+    ///
+    /// February is kept rather than spilling into 1 March, because a family
+    /// asked when the birthday is says "the end of February".
     public func hasBirthday(on date: Date, calendar: Calendar) -> Bool {
         guard let birthday else { return false }
-        return calendar.isDate(birthday, equalTo: date, toGranularity: .day)
-            || (calendar.component(.month, from: birthday) == calendar.component(.month, from: date)
-                && calendar.component(.day, from: birthday) == calendar.component(.day, from: date))
+        let born = calendar.dateComponents([.month, .day], from: birthday)
+        let today = calendar.dateComponents([.month, .day], from: date)
+
+        if born.month == today.month, born.day == today.day { return true }
+
+        guard born.month == 2, born.day == 29, today.month == 2 else { return false }
+        // The last day of this February: 29 in a leap year, which the exact
+        // match above has already handled, and 28 otherwise.
+        guard let daysInMonth = calendar.range(of: .day, in: .month, for: date) else {
+            return false
+        }
+        return today.day == daysInMonth.upperBound - 1
     }
 }
 

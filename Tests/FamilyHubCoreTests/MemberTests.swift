@@ -119,6 +119,66 @@ struct MemberTests {
         #expect(!notToday.hasBirthday(on: clock.now, calendar: clock.calendar))
     }
 
+    @Test("A leap-year birthday lands on the last day of February in other years")
+    func leapYearBirthdayFallsBack() throws {
+        // 2026 is not a leap year. Matching the month and day exactly would
+        // give a child born on 29 February a birthday every fourth year, which
+        // is a charming joke exactly once and then a bug report from a seven
+        // year old.
+        let member = try makeMember(
+            birthday: FixedDateProvider(year: 2016, month: 2, day: 29).now
+        )
+        let calendar = Calendar.testDefault
+
+        let lastDayOfFebruary = FixedDateProvider(year: 2026, month: 2, day: 28).now
+        #expect(member.hasBirthday(on: lastDayOfFebruary, calendar: calendar))
+
+        // February is kept rather than spilling into March, because a family
+        // asked when the birthday is says 'the end of February'.
+        let firstOfMarch = FixedDateProvider(year: 2026, month: 3, day: 1).now
+        #expect(!member.hasBirthday(on: firstOfMarch, calendar: calendar))
+
+        let anyOtherDay = FixedDateProvider(year: 2026, month: 2, day: 27).now
+        #expect(!member.hasBirthday(on: anyOtherDay, calendar: calendar))
+    }
+
+    @Test("A leap-year birthday still lands on the 29th in a leap year")
+    func leapYearBirthdayIsExactWhenItCanBe() throws {
+        let member = try makeMember(
+            birthday: FixedDateProvider(year: 2016, month: 2, day: 29).now
+        )
+        let calendar = Calendar.testDefault
+
+        #expect(
+            member.hasBirthday(
+                on: FixedDateProvider(year: 2028, month: 2, day: 29).now, calendar: calendar
+            )
+        )
+        // And not twice in the same week.
+        #expect(
+            !member.hasBirthday(
+                on: FixedDateProvider(year: 2028, month: 2, day: 28).now, calendar: calendar
+            )
+        )
+    }
+
+    @Test("The last day of February is not everyone's birthday")
+    func nonLeapBirthdaysAreUnaffected() throws {
+        // The fallback must not catch a child genuinely born on the 28th, nor
+        // one born on the 29th of a different month.
+        let calendar = Calendar.testDefault
+        let born28 = try makeMember(
+            birthday: FixedDateProvider(year: 2016, month: 2, day: 28).now
+        )
+        let born29March = try makeMember(
+            birthday: FixedDateProvider(year: 2016, month: 3, day: 29).now
+        )
+        let lastDayOfFebruary = FixedDateProvider(year: 2026, month: 2, day: 28).now
+
+        #expect(born28.hasBirthday(on: lastDayOfFebruary, calendar: calendar))
+        #expect(!born29March.hasBirthday(on: lastDayOfFebruary, calendar: calendar))
+    }
+
     // MARK: Ordering
 
     @Test("Display order puts adults first, then alphabetical")
