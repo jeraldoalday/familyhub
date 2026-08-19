@@ -49,6 +49,15 @@ public enum DomainError: Error, Equatable, Sendable {
     /// The reward is not available to redeem right now.
     case rewardUnavailable(reason: String)
 
+    // MARK: Subscription
+
+    /// The household's plan does not include this feature.
+    ///
+    /// Carries the feature and the plan the household is on so the paywall can
+    /// say what is being asked for rather than showing a generic upgrade
+    /// screen, which converts worse and tells the family nothing.
+    case requiresUpgrade(feature: Feature, tier: Household.Tier)
+
     // MARK: Scheduling
 
     /// A recurrence rule was described in a way that can never produce a date,
@@ -88,6 +97,27 @@ extension DomainError {
         case eventTitle
         case points
         case quantity
+    }
+
+    /// A capability that belongs to a paid plan.
+    ///
+    /// An enumeration rather than a string for the same reason ``Action`` is
+    /// one: the paywall, the settings screen, and the command that refuses the
+    /// operation all have to name the same thing, and three separate string
+    /// literals eventually will not.
+    public enum Feature: String, Codable, Equatable, Sendable, CaseIterable {
+        case rewards
+        case mealPlanning
+        case fullHistory
+
+        /// The feature named as it appears in a sentence.
+        public var label: String {
+            switch self {
+            case .rewards: "Points and rewards"
+            case .mealPlanning: "Meal planning"
+            case .fullHistory: "Full history"
+            }
+        }
     }
 
     /// A guarded operation, named so that permission checks and the messages
@@ -134,6 +164,8 @@ extension DomainError: LocalizedError {
                 "That costs \(required) points and you have \(balance). \(required - balance) to go!"
         case .rewardUnavailable(let reason):
             return "That reward isn't available right now — \(reason)."
+        case .requiresUpgrade(let feature, _):
+            return "\(feature.label) is part of \(Household.Tier.plus.label)."
         case .unsatisfiableRecurrence(let reason):
             return "This chore would never come up: \(reason)."
         case .notScheduled:

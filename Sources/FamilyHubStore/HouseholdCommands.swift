@@ -91,7 +91,240 @@ public struct HouseholdCommands: Sendable {
         try await store.save(target.removed(at: dateProvider.now))
     }
 
+    /// Changes a member's role.
+    ///
+    /// Guarded twice over. An actor may only assign roles their own role
+    /// permits — an adult can promote a teen but cannot mint another owner,
+    /// which is why ownership transfers through its own flow — and a demotion
+    /// that would leave nobody able to reach settings, billing, or the approval
+    /// queue is refused outright.
+    ///
+    /// - Throws: ``DomainError/notPermitted(action:role:)`` or
+    ///   ``DomainError/wouldLeaveHouseholdWithoutAdult``.
+    @discardableResult
+    public func changeRole(
+        of memberID: Identifier<Member>,
+        to newRole: MemberRole,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> Member {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireMember(actorID)
+        let target = try snapshot.requireMember(memberID)
+
+        try Permissions.check(.removeMember, for: actor.role)
+        guard actor.role.assignableRoles.contains(newRole) else {
+            throw DomainError.notPermitted(action: .removeMember, role: actor.role)
+        }
+        try Permissions.checkRoleChange(of: target, to: newRole, in: snapshot.members)
+
+        let updated = target.withRole(newRole)
+        try await store.save(updated)
+        return updated
+    }
+
+    /// Puts a removed member back in the household.
+    ///
+    /// Counts against the tier's seat limit exactly as a new member would, so a
+    /// household cannot get a fourth seat on the free plan by removing somebody
+    /// and reinstating them.
+    ///
+    /// - Throws: ``DomainError/householdFull(limit:)`` or
+    ///   ``DomainError/notPermitted(action:role:)``.
+    @discardableResult
+    public func reinstateMember(
+        _ memberID: Identifier<Member>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> Member {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireMember(actorID)
+        let target = try snapshot.requireMember(memberID)
+
+        try Permissions.check(.inviteMember, for: actor.role)
+        guard !target.isActive else { return target }
+        try snapshot.household.validateCanAddMember(currentCount: snapshot.activeMembers.count)
+
+        let restored = target.reinstated()
+        try await store.save(restored)
+        return restored
+    }
+
     // MARK: - Chores
+
+    /// Creates a chore.
+    ///
+    /// - Throws: ``DomainError/notPermitted(action:role:)`` when the actor may
+    ///   not create chores or may not assign them to somebody else, or a
+    ///   validation error from ``Chore``.
+    @discardableResult
+    public func createChore(
+        in householdID: Identifier<Household>,
+        title: String,
+        notes: String? = nil,
+        assignment: Chore.Assignment = .anyone,
+        points: Int = 10,
+        startingOn startDate: Date? = nil,
+        recurrence: RecurrenceRule = .daily,
+        category: Chore.Category = .other,
+        by actorID: Identifier<Member>
+    ) async throws -> Chore {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireMember(actorID)
+        try Permissions.check(.createChore, for: actor.role)
+        try authorize(assignment, by: actor, in: snapshot)
+
+        let calendar = snapshot.household.calendar()
+        let chore = try Chore(
+            householdID: householdID,
+            title: title,
+            notes: notes,
+            assignment: assignment,
+            points: points,
+            // Normalised on the way in. A chore is a thing that belongs to a
+            // day, and a start date carrying the afternoon it was created at
+            // would make the first occurrence land a day late for anyone in a
+            // timezone behind the household's.
+            startDate: calendar.startOfDay(for: startDate ?? dateProvider.now),
+            recurrence: recurrence,
+            category: category,
+            createdBy: actorID,
+            createdAt: dateProvider.now
+        )
+        try await store.save(chore)
+        return chore
+    }
+
+    /// Edits a chore, leaving anything not named alone.
+    ///
+    /// One command rather than six, because a chore editor saves every field at
+    /// once and six commands would mean six writes, six change notifications,
+    /// and a window in which the chore is half-edited.
+    ///
+    /// `notes` uses a double optional so that "leave the notes alone" and
+    /// "clear the notes" stay distinguishable: omit the parameter for the
+    /// former, pass `.some(nil)` for the latter.
+    ///
+    /// - Throws: ``DomainError/notPermitted(action:role:)`` or a validation
+    ///   error from the new values.
+    @discardableResult
+    public func updateChore(
+        _ choreID: Identifier<Chore>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>,
+        title: String? = nil,
+        notes: String?? = nil,
+        assignment: Chore.Assignment? = nil,
+        points: Int? = nil,
+        category: Chore.Category? = nil,
+        startingOn startDate: Date? = nil,
+        recurrence: RecurrenceRule? = nil
+    ) async throws -> Chore {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireMember(actorID)
+        var chore = try snapshot.requireChore(choreID)
+
+        try Permissions.check(.createChore, for: actor.role)
+        if let assignment {
+            try authorize(assignment, by: actor, in: snapshot)
+        }
+
+        if let title { chore = try chore.retitled(to: title) }
+        if let notes { chore = try chore.withNotes(notes) }
+        if let assignment { chore = chore.assigned(assignment) }
+        if let points { chore = try chore.worth(points) }
+        if let category { chore = chore.inCategory(category) }
+        if startDate != nil || recurrence != nil {
+            let calendar = snapshot.household.calendar()
+            chore = chore.rescheduled(
+                startingOn: startDate.map { calendar.startOfDay(for: $0) },
+                recurrence: recurrence
+            )
+        }
+
+        try await store.save(chore)
+        return chore
+    }
+
+    /// Retires a chore without destroying its history.
+    ///
+    /// Archiving rather than deleting is what the UI offers, because
+    /// completions reference the chore and a family's record of what they did
+    /// should survive a spring clean of the chore list.
+    @discardableResult
+    public func archiveChore(
+        _ choreID: Identifier<Chore>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> Chore {
+        try await updatingChore(choreID, in: householdID, by: actorID) { chore, now in
+            chore.archived(at: now)
+        }
+    }
+
+    /// Returns an archived chore to the rotation.
+    @discardableResult
+    public func restoreChore(
+        _ choreID: Identifier<Chore>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> Chore {
+        try await updatingChore(choreID, in: householdID, by: actorID) { chore, _ in
+            chore.unarchived()
+        }
+    }
+
+    /// Skips one day of a chore — a holiday, a week away.
+    ///
+    /// Recorded as an exception rather than by editing the schedule, so "we
+    /// skipped bin day that once" does not permanently move bin day.
+    @discardableResult
+    public func skipChore(
+        _ choreID: Identifier<Chore>,
+        on day: Date,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> Chore {
+        let calendar = try await store.snapshot(of: householdID).household.calendar()
+        return try await updatingChore(choreID, in: householdID, by: actorID) { chore, _ in
+            chore.skipping(day, calendar: calendar)
+        }
+    }
+
+    /// Puts a skipped day back on the schedule.
+    @discardableResult
+    public func unskipChore(
+        _ choreID: Identifier<Chore>,
+        on day: Date,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> Chore {
+        let calendar = try await store.snapshot(of: householdID).household.calendar()
+        return try await updatingChore(choreID, in: householdID, by: actorID) { chore, _ in
+            chore.unskipping(day, calendar: calendar)
+        }
+    }
+
+    /// Erases a chore and everything recorded against it.
+    ///
+    /// Restricted to whoever can manage the household, and separate from
+    /// archiving on purpose. This is the destructive one — it takes the
+    /// completions with it, which changes what the history screen shows — and
+    /// it exists because a chore created by mistake should be removable and
+    /// because privacy law requires a genuine delete to be possible.
+    ///
+    /// - Throws: ``DomainError/notPermitted(action:role:)``.
+    public func deleteChore(
+        _ choreID: Identifier<Chore>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireMember(actorID)
+        _ = try snapshot.requireChore(choreID)
+        try Permissions.check(.manageHousehold, for: actor.role)
+        try await store.deleteChore(choreID)
+    }
 
     /// Marks an occurrence of a chore as done.
     ///
@@ -350,5 +583,228 @@ public struct HouseholdCommands: Sendable {
             : item.unpurchased()
         try await store.save(updated)
         return updated
+    }
+
+    // MARK: - Household settings
+
+    /// Renames the household.
+    ///
+    /// - Throws: ``DomainError/notPermitted(action:role:)``.
+    @discardableResult
+    public func renameHousehold(
+        _ householdID: Identifier<Household>,
+        to name: String,
+        by actorID: Identifier<Member>
+    ) async throws -> Household {
+        try await updatingHousehold(householdID, by: actorID) { household in
+            try household.renamed(to: name)
+        }
+    }
+
+    /// Turns the approval queue on or off.
+    ///
+    /// Switching it off does not retrospectively bank anything already pending.
+    /// Those completions stay in the queue for an adult to settle, because
+    /// silently paying out work a parent had deliberately held back would
+    /// undo a decision they made on purpose.
+    @discardableResult
+    public func setApprovalRequired(
+        _ required: Bool,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> Household {
+        try await updatingHousehold(householdID, by: actorID) { household in
+            household.withApprovalRequired(required)
+        }
+    }
+
+    /// Changes which day the household's week starts on.
+    @discardableResult
+    public func setFirstWeekday(
+        _ weekday: Int,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> Household {
+        try await updatingHousehold(householdID, by: actorID) { household in
+            household.withFirstWeekday(weekday)
+        }
+    }
+
+    // MARK: - Rewards
+
+    /// Creates a reward.
+    ///
+    /// - Throws: ``DomainError/requiresUpgrade(feature:tier:)`` on a plan
+    ///   without rewards, or ``DomainError/notPermitted(action:role:)``.
+    @discardableResult
+    public func createReward(
+        in householdID: Identifier<Household>,
+        name: String,
+        cost: Int,
+        emoji: String? = nil,
+        eligibleMemberIDs: Set<Identifier<Member>> = [],
+        remainingRedemptions: Int? = nil,
+        cooldownDays: Int? = nil,
+        by actorID: Identifier<Member>
+    ) async throws -> Reward {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireMember(actorID)
+        try Permissions.check(.createReward, for: actor.role)
+
+        // Enforced here rather than only at the paywall. A tier check that
+        // lives in a view is a tier check a second screen forgets.
+        guard snapshot.household.tier.includesRewards else {
+            throw DomainError.requiresUpgrade(feature: .rewards, tier: snapshot.household.tier)
+        }
+
+        // Every named member has to actually be in the household, or the reward
+        // is offered to nobody and silently never appears.
+        for memberID in eligibleMemberIDs {
+            _ = try snapshot.requireMember(memberID)
+        }
+
+        let reward = try Reward(
+            householdID: householdID,
+            name: name,
+            cost: cost,
+            emoji: emoji,
+            eligibleMemberIDs: eligibleMemberIDs,
+            remainingRedemptions: remainingRedemptions,
+            cooldownDays: cooldownDays,
+            createdAt: dateProvider.now
+        )
+        try await store.save(reward)
+        return reward
+    }
+
+    /// Switches a reward on or off without deleting it.
+    ///
+    /// Withdrawing rather than deleting keeps the redemptions in the ledger
+    /// explicable — an entry naming a reward that no longer exists reads as a
+    /// bug to the child who spent the points.
+    @discardableResult
+    public func setRewardActive(
+        _ rewardID: Identifier<Reward>,
+        _ isActive: Bool,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> Reward {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireMember(actorID)
+        let reward = try snapshot.requireReward(rewardID)
+        try Permissions.check(.createReward, for: actor.role)
+
+        let updated = reward.active(isActive)
+        try await store.save(updated)
+        return updated
+    }
+
+    // MARK: - Shopping lists
+
+    /// Creates a shopping list.
+    ///
+    /// The first list a household creates becomes its default, so adding an
+    /// item from a widget or from Siri has somewhere to go without asking.
+    @discardableResult
+    public func createShoppingList(
+        in householdID: Identifier<Household>,
+        name: String,
+        emoji: String? = nil,
+        by actorID: Identifier<Member>
+    ) async throws -> ShoppingList {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireMember(actorID)
+        try Permissions.check(.manageShoppingList, for: actor.role)
+
+        let list = try ShoppingList(
+            householdID: householdID,
+            name: name,
+            emoji: emoji,
+            isDefault: snapshot.shoppingLists.filter(\.isActive).isEmpty,
+            createdBy: actorID,
+            createdAt: dateProvider.now
+        )
+        try await store.save(list)
+        return list
+    }
+
+    /// Removes everything already bought from a list.
+    ///
+    /// A genuine delete rather than an archive, because a shopping list is a
+    /// working document rather than a record: nobody wants last week's
+    /// groceries kept forever, and the ledger does not reference them.
+    ///
+    /// - Returns: How many items were removed.
+    @discardableResult
+    public func clearPurchasedItems(
+        from listID: Identifier<ShoppingList>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> Int {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireMember(actorID)
+        try Permissions.check(.manageShoppingList, for: actor.role)
+
+        let bought = snapshot.items(on: listID).purchased
+        for item in bought {
+            try await store.deleteShoppingItem(item.id)
+        }
+        return bought.count
+    }
+
+    // MARK: - Shared plumbing
+
+    /// Loads a chore, applies a transform, and saves the result.
+    ///
+    /// The four schedule-editing commands differ only in the transform. Sharing
+    /// the load-check-save around them is what keeps the permission check from
+    /// being present on three of them and missing from the fourth.
+    private func updatingChore(
+        _ choreID: Identifier<Chore>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>,
+        _ transform: (Chore, Date) throws -> Chore
+    ) async throws -> Chore {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireMember(actorID)
+        let chore = try snapshot.requireChore(choreID)
+        try Permissions.check(.createChore, for: actor.role)
+
+        let updated = try transform(chore, dateProvider.now)
+        try await store.save(updated)
+        return updated
+    }
+
+    /// Loads the household, applies a transform, and saves the result.
+    private func updatingHousehold(
+        _ householdID: Identifier<Household>,
+        by actorID: Identifier<Member>,
+        _ transform: (Household) throws -> Household
+    ) async throws -> Household {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireMember(actorID)
+        try Permissions.check(.manageHousehold, for: actor.role)
+
+        let updated = try transform(snapshot.household)
+        try await store.save(updated)
+        return updated
+    }
+
+    /// Checks that the actor may hand a chore to the people named on it.
+    ///
+    /// Assigning work to yourself is not the same act as assigning it to
+    /// somebody else, and a teen who may create their own chores must not be
+    /// able to create one for a sibling.
+    private func authorize(
+        _ assignment: Chore.Assignment,
+        by actor: Member,
+        in snapshot: HouseholdSnapshot
+    ) throws {
+        let others = assignment.candidateMemberIDs.filter { $0 != actor.id }
+        for memberID in assignment.candidateMemberIDs {
+            _ = try snapshot.requireMember(memberID)
+        }
+        guard !others.isEmpty else { return }
+        try Permissions.check(.assignChore, for: actor.role)
     }
 }
