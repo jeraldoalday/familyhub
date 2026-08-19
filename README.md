@@ -49,6 +49,21 @@ make format     # reformat in place
 make lint       # the exact formatting check CI runs
 ```
 
+### Formatting
+
+`.swift-format` is the whole standard, and it is strict JSON — swift-format's
+own config parser rejects a file with comments in it on some toolchains and
+accepts it on others, so the reasoning behind a setting goes here rather than
+inline.
+
+The one rule turned off that would otherwise be on is
+`AllPublicDeclarationsHaveDocumentation`. It cannot distinguish genuinely new
+public API from a witness to an already-documented protocol requirement, so it
+flags every `id`, every `now`, and every `save(_:)` conformance in the package.
+Documentation is expected on new API and is checked in review; left on, the
+rule produces enough noise to train people into ignoring the linter, which
+costs more than it collects.
+
 Use `make` rather than `swift test` directly when Xcode is not installed: Swift
 Testing ships as a framework outside the default search path on a Command Line
 Tools-only machine, and the Makefile supplies the flags to find it. With Xcode

@@ -17,11 +17,6 @@
     "accessLevel": "private"
   },
   "rules": {
-    // Off because it cannot distinguish new public API from a witness to an
-    // already-documented protocol requirement, and flags every `id`, `now`,
-    // and `save(_:)` conformance. Documentation is expected on new API and is
-    // covered in review; this rule only produces noise that trains people to
-    // ignore the linter.
     "AllPublicDeclarationsHaveDocumentation": false,
     "AlwaysUseLowerCamelCase": true,
     "AmbiguousTrailingClosureOverload": true,
