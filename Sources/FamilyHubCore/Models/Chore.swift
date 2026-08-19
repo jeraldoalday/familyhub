@@ -242,6 +242,28 @@ extension Chore {
         )
     }
 
+    /// The days this chore falls on inside `range`, each with its position in
+    /// the chore's whole sequence.
+    ///
+    /// What every caller that renders a rotating chore actually needs, since
+    /// the position is what resolves whose turn it is. Asking for the days and
+    /// then asking separately for each position walks the schedule from the
+    /// chore's start once per day; this walks it once.
+    public func indexedOccurrences(
+        in range: ClosedRange<Date>,
+        using engine: RecurrenceEngine,
+        maximum: Int = 500
+    ) -> [RecurrenceEngine.IndexedOccurrence] {
+        guard isActive else { return [] }
+        return engine.indexedOccurrences(
+            of: recurrence,
+            startingOn: startDate,
+            in: range,
+            skipping: skippedDays,
+            maximum: maximum
+        )
+    }
+
     /// The next day this chore falls on after `date`, if any.
     public func nextOccurrence(after date: Date, using engine: RecurrenceEngine) -> Date? {
         guard isActive else { return nil }
@@ -281,14 +303,17 @@ extension Chore {
         let firstDay = engine.calendar.startOfDay(for: startDate)
         guard target >= firstDay else { return nil }
 
-        let all = engine.occurrences(
+        // Asked for the single day rather than for everything up to it. The
+        // engine counts positions from the chore's start either way, so the
+        // answer is identical — but materialising two years of dates to read
+        // the last one's position is what made this quadratic when called per
+        // row.
+        return engine.indexedOccurrences(
             of: recurrence,
             startingOn: firstDay,
-            in: firstDay...target,
-            maximum: Int.max
-        )
-        guard let position = all.lastIndex(of: target) else { return nil }
-        return position
+            in: target...target,
+            maximum: 1
+        ).first?.index
     }
 }
 

@@ -370,4 +370,69 @@ struct RecurrenceEngineTests {
             of: rule, startingOn: date(2026, 3, 2), in: window)
         #expect(days(fromMonday) == days(fromSunday))
     }
+
+    // MARK: - Indexed occurrences
+
+    @Test("Indexed occurrences agree with asking for the days and the positions")
+    func indexedOccurrencesMatchTheSeparateQueries() throws {
+        // The whole point of the combined walk is that it is not a different
+        // answer, only a cheaper one.
+        let rule = try RecurrenceRule.weekly(on: [.monday, .thursday], everyWeeks: 2)
+        let start = date(2026, 3, 2)
+        let window = date(2026, 3, 2)...date(2026, 6, 30)
+
+        let indexed = engine.indexedOccurrences(of: rule, startingOn: start, in: window)
+        let plain = engine.occurrences(of: rule, startingOn: start, in: window)
+
+        #expect(days(indexed.map(\.day)) == days(plain))
+        #expect(indexed.map(\.index) == Array(0..<indexed.count))
+    }
+
+    @Test("Positions count from the chore's start, not from the window")
+    func positionsAreAbsolute() {
+        // A rota that renumbered itself per visible window would put a
+        // different person on the same chore depending on which month the
+        // screen happened to be showing.
+        let start = date(2026, 3, 2)
+        let later = engine.indexedOccurrences(
+            of: .daily, startingOn: start, in: date(2026, 3, 10)...date(2026, 3, 12)
+        )
+        #expect(later.map(\.index) == [8, 9, 10])
+    }
+
+    @Test("Positions count skipped days so a rota does not stall")
+    func skippedDaysStillAdvanceTheRota() {
+        // Not counting them would silently hand the next turn back to whoever
+        // had the skipped one.
+        let start = date(2026, 3, 2)
+        let occurrences = engine.indexedOccurrences(
+            of: .daily,
+            startingOn: start,
+            in: start...date(2026, 3, 5),
+            skipping: [date(2026, 3, 3)]
+        )
+        #expect(days(occurrences.map(\.day)) == ["2026-03-02", "2026-03-04", "2026-03-05"])
+        #expect(occurrences.map(\.index) == [0, 2, 3])
+    }
+
+    @Test("An occurrence limit still counts what the caller never sees")
+    func limitsCountEveryGeneratedOccurrence() throws {
+        let rule = try RecurrenceRule.daily.limited(to: 5)
+        let start = date(2026, 3, 2)
+        let tail = engine.indexedOccurrences(
+            of: rule, startingOn: start, in: date(2026, 3, 4)...date(2026, 3, 20)
+        )
+        #expect(days(tail.map(\.day)) == ["2026-03-04", "2026-03-05", "2026-03-06"])
+        #expect(tail.map(\.index) == [2, 3, 4])
+    }
+
+    @Test("A cap of zero returns nothing rather than trapping")
+    func zeroMaximumIsEmpty() {
+        let start = date(2026, 3, 2)
+        #expect(
+            engine.indexedOccurrences(
+                of: .daily, startingOn: start, in: start...date(2026, 3, 20), maximum: 0
+            ).isEmpty
+        )
+    }
 }

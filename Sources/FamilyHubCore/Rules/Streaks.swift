@@ -200,6 +200,17 @@ public struct StreakCalculator: Sendable {
         lookbackDays: Int = StreakCalculator.defaultLookbackDays
     ) -> Streak {
         let today = engine.calendar.startOfDay(for: day)
+        guard
+            let earliest = engine.calendar.date(
+                byAdding: .day, value: -max(0, lookbackDays), to: today
+            )
+        else { return .none }
+
+        // Indexed once over the whole window rather than resolved per day. The
+        // rota is counted from each chore's start date, so asking "is this mine
+        // today" separately for each of a hundred and eighty days walks the
+        // whole history a hundred and eighty times per chore.
+        let assignments = self.assignments(to: memberID, from: earliest, to: today)
         var length = 0
         var lastDay: Date?
 
@@ -208,7 +219,7 @@ public struct StreakCalculator: Sendable {
                 let cursor = engine.calendar.date(byAdding: .day, value: -offset, to: today)
             else { break }
 
-            let assigned = choresAssigned(to: memberID, on: cursor)
+            let assigned = assignments[cursor] ?? []
             // A day that asked nothing of them is skipped over entirely.
             guard !assigned.isEmpty else { continue }
 
@@ -271,11 +282,17 @@ public struct StreakCalculator: Sendable {
         return
             chores
             .compactMap { chore -> AtRisk? in
-                guard chore.occurs(on: today, using: engine) else { return nil }
+                // One walk answers both whether it falls today and whose turn
+                // it is.
+                guard
+                    let occurrence =
+                        chore
+                        .indexedOccurrences(in: today...today, using: engine, maximum: 1)
+                        .first
+                else { return nil }
                 guard !isDone(chore, on: today) else { return nil }
 
-                let index = chore.occurrenceIndex(of: today, using: engine) ?? 0
-                let assigneeID = chore.assignee(forOccurrenceIndex: index)
+                let assigneeID = chore.assignee(forOccurrenceIndex: occurrence.index)
                 if let memberID {
                     // An open chore is at risk for everyone, since anyone can
                     // save it.
@@ -324,17 +341,29 @@ public struct StreakCalculator: Sendable {
         return chore.occurrences(in: earliest...day, using: engine, maximum: lookbackDays + 1)
     }
 
-    /// The chores assigned specifically to `memberID` on a given day.
-    private func choresAssigned(
+    /// The chores assigned specifically to `memberID` on each day of a window.
+    ///
+    /// Built with one walk of each chore's schedule. Days the member was not
+    /// named on are simply absent, which is what lets the streak treat them as
+    /// neutral without a second lookup.
+    private func assignments(
         to memberID: Identifier<Member>,
-        on day: Date
-    ) -> [Chore] {
-        chores.filter { chore in
-            guard chore.assignment.isSpecific else { return false }
-            guard chore.occurs(on: day, using: engine) else { return false }
-            let index = chore.occurrenceIndex(of: day, using: engine) ?? 0
-            return chore.assignee(forOccurrenceIndex: index) == memberID
+        from earliest: Date,
+        to latest: Date
+    ) -> [Date: [Chore]] {
+        var byDay: [Date: [Chore]] = [:]
+        for chore in chores where chore.assignment.isSpecific {
+            let occurrences = chore.indexedOccurrences(
+                in: earliest...latest,
+                using: engine,
+                maximum: Int.max
+            )
+            for occurrence in occurrences
+            where chore.assignee(forOccurrenceIndex: occurrence.index) == memberID {
+                byDay[occurrence.day, default: []].append(chore)
+            }
         }
+        return byDay
     }
 }
 

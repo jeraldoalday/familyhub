@@ -197,8 +197,18 @@ extension HouseholdSnapshot {
 
         var entries: [AgendaEntry] = []
         for chore in activeChores {
-            guard chore.occurs(on: normalizedDay, using: engine) else { continue }
-            let index = chore.occurrenceIndex(of: normalizedDay, using: engine) ?? 0
+            // One walk of the schedule per chore, answering both "does it fall
+            // today" and "whose turn is it" — asking those separately walks
+            // from the chore's start twice for every row on the screen.
+            guard
+                let occurrence =
+                    chore
+                    .indexedOccurrences(
+                        in: normalizedDay...normalizedDay, using: engine, maximum: 1
+                    )
+                    .first
+            else { continue }
+            let index = occurrence.index
             let assigneeID = chore.assignee(forOccurrenceIndex: index)
 
             if let memberID {

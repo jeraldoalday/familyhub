@@ -303,16 +303,22 @@ public struct HouseholdInsights: Sendable {
     }
 
     /// Every occurrence of every active chore inside the range.
+    ///
+    /// One walk of the schedule per chore. Resolving the rota by asking for
+    /// each day's position separately walks from the chore's start once per
+    /// day, which on a week of daily chores is seven times the work for the
+    /// same answer — and grows with the household's whole history rather than
+    /// with the week being summarised.
     private func occurrences(in range: ClosedRange<Date>) -> [ScheduledOccurrence] {
         snapshot.activeChores.flatMap { chore -> [ScheduledOccurrence] in
-            chore.occurrences(in: range, using: engine).map { day in
-                let index = chore.occurrenceIndex(of: day, using: engine) ?? 0
-                return ScheduledOccurrence(
-                    chore: chore,
-                    day: day,
-                    assigneeID: chore.assignee(forOccurrenceIndex: index)
-                )
-            }
+            chore.indexedOccurrences(in: range, using: engine, maximum: Int.max)
+                .map { occurrence in
+                    ScheduledOccurrence(
+                        chore: chore,
+                        day: occurrence.day,
+                        assigneeID: chore.assignee(forOccurrenceIndex: occurrence.index)
+                    )
+                }
         }
     }
 

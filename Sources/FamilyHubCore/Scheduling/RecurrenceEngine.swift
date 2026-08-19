@@ -56,16 +56,74 @@ public struct RecurrenceEngine: Sendable {
         skipping exceptions: Set<Date> = [],
         maximum: Int = 500
     ) -> [Date] {
+        indexedOccurrences(
+            of: rule,
+            startingOn: start,
+            in: range,
+            skipping: exceptions,
+            maximum: maximum
+        )
+        .map(\.day)
+    }
+
+    /// One occurrence, with its position in the rule's whole sequence.
+    public struct IndexedOccurrence: Hashable, Sendable {
+        /// The start-of-day the occurrence falls on.
+        public let day: Date
+
+        /// Its zero-based position counted from the chore's start date, which
+        /// is what resolves a rotating assignment.
+        public let index: Int
+
+        public init(day: Date, index: Int) {
+            self.day = day
+            self.index = index
+        }
+    }
+
+    /// The occurrences inside `range`, each carrying its position in the whole
+    /// sequence.
+    ///
+    /// The same walk as ``occurrences(of:startingOn:in:skipping:maximum:)``,
+    /// keeping the running count it was already doing internally instead of
+    /// throwing it away. Callers that need both — which is every caller that
+    /// renders a rotating chore — get them from one pass rather than by asking
+    /// for the days and then asking again, per day, for each position. On a
+    /// household with two years of history that is the difference between
+    /// linear and quadratic on the agenda.
+    ///
+    /// Positions count skipped days, deliberately. Skipping a week should
+    /// advance the rota; not counting them would silently make the person whose
+    /// turn was skipped take the next turn as well.
+    ///
+    /// - Parameters:
+    ///   - rule: The recurrence to expand.
+    ///   - start: The chore's start date.
+    ///   - range: The window of interest.
+    ///   - exceptions: Days the family explicitly skipped. Excluded from the
+    ///     result, counted in the positions.
+    ///   - maximum: A cap on the returned count.
+    /// - Returns: Ascending occurrences with their positions.
+    public func indexedOccurrences(
+        of rule: RecurrenceRule,
+        startingOn start: Date,
+        in range: ClosedRange<Date>,
+        skipping exceptions: Set<Date> = [],
+        maximum: Int = 500
+    ) -> [IndexedOccurrence] {
         guard maximum > 0 else { return [] }
         let lowerBound = calendar.startOfDay(for: range.lowerBound)
         let upperBound = calendar.startOfDay(for: range.upperBound)
         let normalizedExceptions = Set(exceptions.map { calendar.startOfDay(for: $0) })
 
-        var results: [Date] = []
+        var results: [IndexedOccurrence] = []
+        var position = 0
         enumerate(rule: rule, startingOn: start, notAfter: upperBound) { date in
+            let index = position
+            position += 1
             guard date >= lowerBound else { return .continue }
             guard !normalizedExceptions.contains(date) else { return .continue }
-            results.append(date)
+            results.append(IndexedOccurrence(day: date, index: index))
             return results.count >= maximum ? .stop : .continue
         }
         return results
