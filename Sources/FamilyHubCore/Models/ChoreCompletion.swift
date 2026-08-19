@@ -196,6 +196,16 @@ extension Collection where Element == ChoreCompletion {
                 winners[completion.occurrenceKey] = completion
             }
         }
-        return winners.values.sorted { $0.completedAt < $1.completedAt }
+        // Sorted with the identifier as a tiebreaker for the same reason the
+        // winner is chosen with one. Ticking four chores off in one go stamps
+        // them all with the same instant, and `Dictionary.values` has no order
+        // worth relying on — Swift seeds its hashing per process, so sorting on
+        // the timestamp alone returns those four in a different sequence on
+        // every launch. A history list that reshuffles itself between reads
+        // looks like data changing when nothing has.
+        return winners.values.sorted { lhs, rhs in
+            if lhs.completedAt != rhs.completedAt { return lhs.completedAt < rhs.completedAt }
+            return lhs.id < rhs.id
+        }
     }
 }

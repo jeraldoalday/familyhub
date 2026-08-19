@@ -175,6 +175,26 @@ struct ChoreCompletionTests {
         #expect(forward == [min(a.id, b.id)])
     }
 
+    @Test("Completions stamped at the same instant come back in a stable order")
+    func simultaneousCompletionsAreStablyOrdered() {
+        // Ticking several chores off in one go stamps them all with the same
+        // instant, which is the common case rather than the exotic one. The
+        // result is assembled from a dictionary, and Swift seeds its hashing
+        // per process, so sorting on the timestamp alone hands back a different
+        // sequence on every launch.
+        let sameMoment = date(2026, 3, 2, hour: 12)
+        let simultaneous = (0..<6).map { _ in
+            makeCompletion(chore: Identifier<Chore>(), completedAt: sameMoment)
+        }
+
+        let resolved = simultaneous.deduplicatedByOccurrence()
+        #expect(resolved.count == 6)
+        #expect(resolved.map(\.id) == simultaneous.map(\.id).sorted())
+
+        // Shuffling the input must not change the output.
+        #expect(simultaneous.shuffled().deduplicatedByOccurrence().map(\.id) == resolved.map(\.id))
+    }
+
     @Test("Different occurrences of the same chore are both kept")
     func differentDaysAreNotDuplicates() {
         let monday = makeCompletion(occurrence: date(2026, 3, 2))
