@@ -138,6 +138,65 @@ struct HouseholdCommandsTests {
         #expect(snapshot.ledger.balance(for: f.child.id) == 20)
     }
 
+    @Test("A chore cannot be completed on a day it is not due")
+    func unscheduledDayIsRefused() async throws {
+        // The fixture chore is daily, so it needs a schedule with gaps to have
+        // a day that genuinely is not an occurrence.
+        let f = try await makeFixture()
+        let mondaysOnly = try Chore(
+            householdID: f.household.id,
+            title: "Put the bins out",
+            assignment: .member(f.child.id),
+            startDate: clock.today,
+            recurrence: try RecurrenceRule.weekly(on: [.monday]),
+            createdBy: f.parent.id,
+            createdAt: clock.now
+        )
+        try await f.store.save(mondaysOnly)
+
+        // 2 March 2026 is a Monday, so the Tuesday after it is not an occurrence.
+        let tuesday = clock.day(offsetFromToday: 1)
+        await #expect(throws: DomainError.notScheduled(on: tuesday)) {
+            try await f.commands.completeChore(
+                mondaysOnly.id, on: tuesday, in: f.household.id, by: f.child.id
+            )
+        }
+
+        let snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.completions.isEmpty)
+        #expect(snapshot.ledger.balance(for: f.child.id) == 0)
+    }
+
+    @Test("A skipped day cannot be completed")
+    func skippedDayIsRefused() async throws {
+        // Skipping is how a family says 'not this week'. Leaving the occurrence
+        // completable would make the skip cosmetic — the chore would vanish
+        // from the agenda while a widget still holding it could pay it out.
+        let f = try await makeFixture()
+        try await f.store.save(f.chore.skipping(clock.today, calendar: calendar))
+
+        await #expect(throws: DomainError.notScheduled(on: clock.today)) {
+            try await f.commands.completeChore(
+                f.chore.id, on: clock.today, in: f.household.id, by: f.child.id
+            )
+        }
+    }
+
+    @Test("An archived chore cannot be completed")
+    func archivedChoreIsRefused() async throws {
+        // Archiving retires a chore without destroying its history. A stale
+        // agenda on another device must not be able to bank points for work
+        // the household has stopped asking for.
+        let f = try await makeFixture()
+        try await f.store.save(f.chore.archived(at: clock.now))
+
+        await #expect(throws: DomainError.notScheduled(on: clock.today)) {
+            try await f.commands.completeChore(
+                f.chore.id, on: clock.today, in: f.household.id, by: f.child.id
+            )
+        }
+    }
+
     @Test("A child cannot complete a sibling's chore")
     func siblingCompletionIsRefused() async throws {
         let f = try await makeFixture()

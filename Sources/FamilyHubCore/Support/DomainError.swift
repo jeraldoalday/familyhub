@@ -55,6 +55,14 @@ public enum DomainError: Error, Equatable, Sendable {
     /// such as a weekly rule with no weekdays selected.
     case unsatisfiableRecurrence(reason: String)
 
+    /// The chore does not fall on the day it was asked about.
+    ///
+    /// Raised when an occurrence is acted on that the schedule never produced:
+    /// a day outside the recurrence, a day the family skipped, or any day at
+    /// all once the chore has been archived. Carries the day so the UI can say
+    /// which one it means rather than making the person work it out.
+    case notScheduled(on: Date)
+
     // MARK: Lookup
 
     /// The occurrence has already been completed. Completing twice would pay
@@ -128,6 +136,8 @@ extension DomainError: LocalizedError {
             return "That reward isn't available right now — \(reason)."
         case .unsatisfiableRecurrence(let reason):
             return "This chore would never come up: \(reason)."
+        case .notScheduled:
+            return "That chore isn't due on that day."
         case .alreadyCompleted:
             return "This one's already done."
         case .notFound(let entity, _):

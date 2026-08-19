@@ -99,8 +99,9 @@ public struct HouseholdCommands: Sendable {
     /// the ledger entry that pays for it. The two are written together here so
     /// they cannot come apart.
     ///
-    /// - Throws: ``DomainError/alreadyCompleted`` if the occurrence is already
-    ///   recorded, ``DomainError/notPermitted(action:role:)``, or
+    /// - Throws: ``DomainError/notScheduled(on:)`` if the chore does not fall
+    ///   on that day, ``DomainError/alreadyCompleted`` if the occurrence is
+    ///   already recorded, ``DomainError/notPermitted(action:role:)``, or
     ///   ``DomainError/notFound(entity:id:)``.
     @discardableResult
     public func completeChore(
@@ -114,6 +115,18 @@ public struct HouseholdCommands: Sendable {
         let member = try snapshot.requireMember(memberID)
         let calendar = snapshot.household.calendar()
         let normalizedDay = calendar.startOfDay(for: day)
+
+        // Asked before anything else, because a day the schedule never
+        // produced is not a permission question — nobody is authorised to
+        // complete an occurrence that does not exist. This catches three cases
+        // that all arrive as the same mistake: a day outside the recurrence, a
+        // day the family explicitly skipped, and any day at all once the chore
+        // has been archived. Without it a stale view, a widget holding
+        // yesterday's agenda, or a replayed sync write pays out points for a
+        // Tuesday the chore was never due on.
+        guard chore.occurs(on: normalizedDay, using: snapshot.engine) else {
+            throw DomainError.notScheduled(on: normalizedDay)
+        }
 
         try Permissions.authorizeCompletion(
             of: chore,
