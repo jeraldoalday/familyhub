@@ -29,6 +29,25 @@ public protocol HouseholdStore: Sendable {
     /// belongs to two families.
     func households() async throws -> [Household]
 
+    // MARK: Observing
+
+    /// Every change to a household, as it happens.
+    ///
+    /// Part of the contract rather than an optional extra. A store that cannot
+    /// report its own writes leaves every screen either polling or reloading on
+    /// appearance, and a chore ticked off on a second device stays invisible
+    /// until somebody navigates away and back — which reads as a sync bug and
+    /// is impossible to distinguish from one.
+    ///
+    /// The stream is scoped to one household so a subscriber watching one
+    /// family is not woken by another, and it is expected to stay open until
+    /// the caller stops iterating. Several callers may observe the same
+    /// household at once; each gets its own stream.
+    ///
+    /// Most callers want ``snapshots(of:where:)`` instead, which turns this
+    /// into the reload loop a view model would otherwise write for itself.
+    func changes(for householdID: Identifier<Household>) async -> AsyncStream<HouseholdChange>
+
     // MARK: Writing
 
     /// Inserts or replaces a household.

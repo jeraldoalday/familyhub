@@ -22,6 +22,26 @@ public actor InMemoryHouseholdStore: HouseholdStore {
     private var shoppingListsByID: [Identifier<ShoppingList>: ShoppingList] = [:]
     private var shoppingItemsByID: [Identifier<ShoppingItem>: ShoppingItem] = [:]
 
+    /// Open change-feed subscriptions, keyed by a token so each can be removed
+    /// when its consumer stops iterating.
+    private var subscribers: [UUID: Subscription] = [:]
+
+    /// One open change feed.
+    private struct Subscription {
+        let householdID: Identifier<Household>
+        let continuation: AsyncStream<HouseholdChange>.Continuation
+    }
+
+    /// How many unread changes a slow subscriber may accumulate.
+    ///
+    /// Bounded rather than unlimited, and dropping the *oldest* when full. The
+    /// only correct reaction to a change is to reload the snapshot, so a
+    /// subscriber that has fallen behind wants the newest notification and does
+    /// not care that it missed four earlier ones — it is about to read
+    /// everything anyway. An unbounded buffer would instead grow without limit
+    /// behind a suspended view.
+    private static let changeBufferSize = 32
+
     /// Creates an empty store.
     public init() {}
 
@@ -63,52 +83,67 @@ public actor InMemoryHouseholdStore: HouseholdStore {
 
     public func save(_ household: Household) {
         householdsByID[household.id] = household
+        publish(.upserted(household))
     }
 
     public func save(_ member: Member) {
         membersByID[member.id] = member
+        publish(.upserted(member))
     }
 
     public func save(_ chore: Chore) {
         choresByID[chore.id] = chore
+        publish(.upserted(chore))
     }
 
     public func save(_ completion: ChoreCompletion) {
         completionsByID[completion.id] = completion
+        publish(.upserted(completion))
     }
 
     public func append(_ entry: LedgerEntry) {
         // Keyed by identifier rather than appended blindly, so a sync that
         // redelivers an entry converges instead of double-counting it.
         ledgerEntriesByID[entry.id] = entry
+        publish(.appended(entry))
     }
 
     public func save(_ reward: Reward) {
         rewardsByID[reward.id] = reward
+        publish(.upserted(reward))
     }
 
     public func save(_ list: ShoppingList) {
         shoppingListsByID[list.id] = list
+        publish(.upserted(list))
     }
 
     public func save(_ item: ShoppingItem) {
         shoppingItemsByID[item.id] = item
+        publish(.upserted(item))
     }
 
     // MARK: Deleting
 
     public func deleteChore(_ id: Identifier<Chore>) {
+        guard let chore = choresByID[id] else { return }
         choresByID[id] = nil
         // Completions are removed alongside, because a completion pointing at
         // a chore that no longer exists cannot render a row and would sit in
         // the ledger's history as an unexplainable entry.
         for (key, completion) in completionsByID where completion.choreID == id {
             completionsByID[key] = nil
+            publish(
+                .deleted(.completion, completion.id.rawValue, in: completion.householdID)
+            )
         }
+        publish(.deleted(.chore, id.rawValue, in: chore.householdID))
     }
 
     public func deleteShoppingItem(_ id: Identifier<ShoppingItem>) {
+        guard let item = shoppingItemsByID[id] else { return }
         shoppingItemsByID[id] = nil
+        publish(.deleted(.shoppingItem, id.rawValue, in: item.householdID))
     }
 
     public func deleteHousehold(_ id: Identifier<Household>) {
@@ -120,7 +155,61 @@ public actor InMemoryHouseholdStore: HouseholdStore {
         rewardsByID = rewardsByID.filter { $0.value.householdID != id }
         shoppingListsByID = shoppingListsByID.filter { $0.value.householdID != id }
         shoppingItemsByID = shoppingItemsByID.filter { $0.value.householdID != id }
+
+        // One change for the whole household rather than one per orphaned
+        // record. A subscriber's only reaction is to reload, and reloading a
+        // household that has just been erased is what ends its stream — so
+        // several hundred notifications would all say the same thing to a
+        // subscriber that is about to stop listening.
+        publish(.deleted(.household, id.rawValue, in: id))
+        finishSubscribers(of: id)
     }
+
+    // MARK: Observing
+
+    public func changes(
+        for householdID: Identifier<Household>
+    ) -> AsyncStream<HouseholdChange> {
+        let token = UUID()
+        return AsyncStream(bufferingPolicy: .bufferingOldest(Self.changeBufferSize)) {
+            continuation in
+            subscribers[token] = Subscription(
+                householdID: householdID, continuation: continuation
+            )
+            // The termination handler runs outside the actor, so removal hops
+            // back in. Without it a view that has gone away keeps a
+            // continuation alive here for the lifetime of the store.
+            continuation.onTermination = { [weak self] _ in
+                Task { await self?.removeSubscriber(token) }
+            }
+        }
+    }
+
+    /// Delivers a change to everyone watching its household.
+    private func publish(_ change: HouseholdChange) {
+        for subscription in subscribers.values
+        where subscription.householdID == change.householdID {
+            subscription.continuation.yield(change)
+        }
+    }
+
+    /// Ends every stream watching a household that no longer exists.
+    private func finishSubscribers(of householdID: Identifier<Household>) {
+        for (token, subscription) in subscribers
+        where subscription.householdID == householdID {
+            subscription.continuation.finish()
+            subscribers[token] = nil
+        }
+    }
+
+    /// Drops a subscription whose consumer has stopped iterating.
+    private func removeSubscriber(_ token: UUID) {
+        subscribers[token] = nil
+    }
+
+    /// How many change feeds are currently open, for tests that assert a
+    /// cancelled subscription is actually released.
+    public var openChangeFeeds: Int { subscribers.count }
 
     // MARK: Introspection
 
