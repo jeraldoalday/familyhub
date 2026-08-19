@@ -109,6 +109,40 @@ struct PointsLedgerTests {
         #expect(ledger.balance(for: alex, asOf: asOf, calendar: calendar) == 10)
     }
 
+    @Test("A historical balance respects a short day when the clocks go forward")
+    func historicalBalanceHandlesDaylightSaving() throws {
+        // British Summer Time starts at 01:00 on 29 March 2026, making that day
+        // twenty-three hours long. A cutoff computed by adding 86,400 seconds to
+        // its midnight therefore lands at 01:00 on the 30th, and would count a
+        // chore ticked off at half past midnight on the 30th toward the 29th.
+        var london = Calendar(identifier: .gregorian)
+        london.timeZone = try #require(TimeZone(identifier: "Europe/London"))
+        london.firstWeekday = 2
+
+        let justAfterMidnight = FixedDateProvider(
+            year: 2026, month: 3, day: 30, hour: 0, minute: 30, calendar: london
+        ).now
+        let ledger = PointsLedger(entries: [
+            LedgerEntry(
+                householdID: householdID,
+                memberID: alex,
+                amount: 10,
+                source: .adjustment(by: parent),
+                occurredAt: justAfterMidnight
+            )
+        ])
+
+        let theShortDay = FixedDateProvider(
+            year: 2026, month: 3, day: 29, hour: 12, calendar: london
+        ).now
+        #expect(ledger.balance(for: alex, asOf: theShortDay, calendar: london) == 0)
+
+        let theDayItself = FixedDateProvider(
+            year: 2026, month: 3, day: 30, hour: 12, calendar: london
+        ).now
+        #expect(ledger.balance(for: alex, asOf: theDayItself, calendar: london) == 10)
+    }
+
     // MARK: Earned versus spent
 
     @Test("Earned and spent are tracked separately from the balance")

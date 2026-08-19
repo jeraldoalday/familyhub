@@ -53,7 +53,14 @@ public struct PointsLedger: Sendable {
         asOf date: Date,
         calendar: Calendar
     ) -> Int {
-        let cutoff = calendar.startOfDay(for: date).addingTimeInterval(24 * 60 * 60)
+        let startOfDay = calendar.startOfDay(for: date)
+        // Stepped by a calendar day rather than by 86,400 seconds. The day the
+        // clocks go forward is twenty-three hours long, so adding a fixed day's
+        // worth of seconds to its midnight lands an hour into the *next* day —
+        // and a chore ticked off at 00:30 on Monday would then be counted in
+        // Sunday's total. Twice a year, on exactly the days a family is most
+        // likely to be checking a disputed balance.
+        let cutoff = calendar.date(byAdding: .day, value: 1, to: startOfDay) ?? startOfDay
         return entries.reduce(into: 0) { total, entry in
             guard entry.memberID == memberID, entry.occurredAt < cutoff else { return }
             total += entry.amount
