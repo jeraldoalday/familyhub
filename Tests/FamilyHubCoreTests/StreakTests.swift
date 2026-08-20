@@ -215,6 +215,36 @@ struct StreakTests {
         #expect(longest.isLive)
     }
 
+    @Test("A chore nobody has ever finished has no record, live or otherwise")
+    func longestStreakOfNothingIsNotLive() throws {
+        let chore = try makeChore()
+        let longest = calculator(chores: [chore], completions: [])
+            .longestStreak(for: chore, upTo: day(6))
+
+        #expect(longest.length == 0)
+        #expect(longest.lastDay == nil)
+        // The arithmetic inside `longestStreak` compares the best run against
+        // the current one, and zero is trivially equal to zero — so the only
+        // thing stopping a record nobody has set from describing itself as
+        // still going is the normalisation in `Streak.init`. This is the test
+        // that stops that guard being removed as dead defensiveness.
+        #expect(!longest.isLive)
+        #expect(longest == .none)
+        #expect(!longest.isNoteworthy)
+    }
+
+    @Test("A record broken today is not live even though it was this morning")
+    func longestStreakBrokenIsNotLive() throws {
+        let chore = try makeChore()
+        // Three days done, then two missed.
+        let done = (0...2).map { completion(of: chore, on: $0) }
+        let longest = calculator(chores: [chore], completions: done)
+            .longestStreak(for: chore, upTo: day(5))
+
+        #expect(longest.length == 3)
+        #expect(!longest.isLive)
+    }
+
     // MARK: Member streaks
 
     @Test("A member's streak counts days they finished everything assigned")
@@ -468,5 +498,18 @@ struct StreakTests {
             .streak(forMember: sam, asOf: day(2))
 
         #expect(streak.length == 0)
+    }
+
+    // MARK: The zero-length invariant
+
+    @Test("A run of nothing is never live, however it is constructed")
+    func zeroLengthIsNeverLive() {
+        #expect(!Streak(length: 0, lastDay: nil, isLive: true).isLive)
+        #expect(Streak(length: 0, lastDay: nil, isLive: true) == .none)
+        // Negative lengths cannot arise from the calculator, but a decoded
+        // record or a future caller could hand one over, and a run of minus
+        // three days on a child's home screen is not a number to ship.
+        #expect(Streak(length: -3, lastDay: nil, isLive: true).length == 0)
+        #expect(!Streak(length: -3, lastDay: nil, isLive: true).isLive)
     }
 }
