@@ -73,7 +73,8 @@ struct HouseholdInsightsTests {
         of chore: Chore,
         on offset: Int,
         by memberID: Identifier<Member>,
-        lateByDays: Int = 0
+        lateByDays: Int = 0,
+        approval: ChoreCompletion.Approval = .notRequired
     ) -> ChoreCompletion {
         ChoreCompletion(
             householdID: f.household.id,
@@ -81,6 +82,7 @@ struct HouseholdInsightsTests {
             occurrenceDay: day(offset),
             completedBy: memberID,
             completedAt: day(offset + lateByDays).addingTimeInterval(60 * 60 * 18),
+            approval: approval,
             pointsAwarded: chore.points,
             calendar: calendar
         )
@@ -411,5 +413,121 @@ struct HouseholdInsightsTests {
 
         #expect(balance.isBalanced)
         #expect(balance.widestGap == 0)
+    }
+
+    // MARK: Work an adult sent back
+
+    @Test("A chore sent back is not a chore done")
+    func rejectedWorkIsNotCounted() throws {
+        let f = try makeFixture()
+        let chore = try makeChore(f, title: "Feed the cat")
+        let completions = [
+            completion(f, of: chore, on: 0, by: f.sam.id),
+            completion(
+                f,
+                of: chore,
+                on: 1,
+                by: f.sam.id,
+                approval: .rejected(by: f.parent.id, at: day(1), reason: "under the table")
+            ),
+        ]
+        let recap = snapshot(f, chores: [chore], completions: completions)
+            .insights
+            .recap(from: day(0), to: day(1))
+
+        #expect(recap.scheduled == 2)
+        #expect(recap.completed == 1)
+        #expect(recap.completionRate == 0.5)
+    }
+
+    @Test("A chore sent back counts as missed, so the recap can name it")
+    func rejectedWorkCountsAsMissed() throws {
+        let f = try makeFixture()
+        let done = try makeChore(f, title: "Feed the cat")
+        let sentBack = try makeChore(f, title: "Tidy your room")
+        let completions = [
+            completion(f, of: done, on: 0, by: f.sam.id),
+            completion(f, of: done, on: 1, by: f.sam.id),
+            completion(
+                f,
+                of: sentBack,
+                on: 0,
+                by: f.sam.id,
+                approval: .rejected(by: f.parent.id, at: day(0), reason: nil)
+            ),
+            completion(
+                f,
+                of: sentBack,
+                on: 1,
+                by: f.sam.id,
+                approval: .rejected(by: f.parent.id, at: day(1), reason: nil)
+            ),
+        ]
+        let recap = snapshot(f, chores: [done, sentBack], completions: completions)
+            .insights
+            .recap(from: day(0), to: day(1))
+
+        #expect(recap.mostMissedChore?.id == sentBack.id)
+    }
+
+    @Test("Work waiting on a parent still counts as done")
+    func pendingWorkIsCounted() throws {
+        let f = try makeFixture()
+        let chore = try makeChore(f, title: "Feed the cat")
+        let recap = snapshot(
+            f,
+            chores: [chore],
+            completions: [completion(f, of: chore, on: 0, by: f.sam.id, approval: .pending)]
+        )
+        .insights
+        .recap(from: day(0), to: day(0))
+
+        #expect(recap.completed == 1)
+    }
+
+    @Test("A member's row agrees with the recap about what they finished")
+    func memberSummaryAgreesWithTheRecap() throws {
+        let f = try makeFixture()
+        let chore = try makeChore(f, title: "Feed the cat", assignment: .member(f.sam.id))
+        let completions = [
+            completion(f, of: chore, on: 0, by: f.sam.id),
+            completion(
+                f,
+                of: chore,
+                on: 1,
+                by: f.sam.id,
+                approval: .rejected(by: f.parent.id, at: day(1), reason: nil)
+            ),
+        ]
+        let recap = snapshot(f, chores: [chore], completions: completions)
+            .insights
+            .recap(from: day(0), to: day(1))
+
+        let sam = try #require(recap.members.first { $0.member.id == f.sam.id })
+        #expect(sam.assigned == 2)
+        #expect(sam.completed == 1)
+        #expect(sam.completedByThem == 1)
+    }
+
+    @Test("A redo replacing a rejected record is the one that counts")
+    func redoWinsOverTheRejection() throws {
+        let f = try makeFixture()
+        let chore = try makeChore(f, title: "Feed the cat")
+        // The two records share an occurrence, as they do on a device that has
+        // not yet collapsed the redo onto the rejection's identifier.
+        let rejected = completion(
+            f,
+            of: chore,
+            on: 0,
+            by: f.sam.id,
+            approval: .rejected(by: f.parent.id, at: day(0), reason: nil)
+        )
+        let redo = completion(f, of: chore, on: 0, by: f.sam.id, lateByDays: 1)
+        let recap = snapshot(f, chores: [chore], completions: [rejected, redo])
+            .insights
+            .recap(from: day(0), to: day(0))
+
+        #expect(recap.completed == 1)
+        #expect(recap.onTime == 0)
     }
 }

@@ -137,7 +137,7 @@ public struct HouseholdInsights: Sendable {
         // morning and fall every evening for reasons unrelated to the work.
         let settled = occurrences(in: range)
         let completions = Dictionary(
-            snapshot.completions.deduplicatedByOccurrence().map { ($0.occurrenceKey, $0) },
+            settledCompletions.map { ($0.occurrenceKey, $0) },
             uniquingKeysWith: { first, _ in first }
         )
 
@@ -172,6 +172,25 @@ public struct HouseholdInsights: Sendable {
             busiestDay: busiestDay(from: perDay),
             mostMissedChore: mostMissed(from: missesByChore)
         )
+    }
+
+    /// The completions that count as the work having been done.
+    ///
+    /// A record an adult sent back does not. The whole meaning of rejecting a
+    /// completion is that the work has to happen again, which is why the home
+    /// screen shows the chore as outstanding and why the streak calculator
+    /// treats the day as a miss — and a recap that counted it anyway would tell
+    /// a family they finished a week they are still halfway through.
+    ///
+    /// Filtered before deduplicating rather than after, so an occurrence with
+    /// both a rejected record and its replacement resolves to the replacement
+    /// rather than to whichever came first. The streak calculator resolves the
+    /// same collision the same way, and the two disagreeing is the bug this
+    /// property exists to prevent.
+    private var settledCompletions: [ChoreCompletion] {
+        snapshot.completions
+            .filter(\.approval.countsAsDone)
+            .deduplicatedByOccurrence()
     }
 
     // MARK: - Who is doing the work
