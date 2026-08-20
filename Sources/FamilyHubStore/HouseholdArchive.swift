@@ -111,14 +111,17 @@ public struct HouseholdArchive: Sendable, Codable {
     ///
     /// The seam was built at version 1, when it was the identity, on the
     /// argument that discovering at version 2 that every restore path assumed
-    /// the current shape produces a migration written under pressure. Version 2
-    /// is here, and the argument held: the step is four lines because the
-    /// decision it needed was made a version early.
+    /// the current shape produces a migration written under pressure. Two
+    /// versions later the argument has held twice: each step is a line in a
+    /// switch because the decision it needed was made before it was needed.
     ///
-    /// Version 1 predates the meal plan. Its snapshots decode with no planned
-    /// meals — which is not a gap to be filled in but the truth about that
-    /// household, since there was no meal plan to have — so migrating is
-    /// restamping the version rather than transforming the contents.
+    /// Version 1 predates the meal plan and version 2 the family calendar. In
+    /// both cases the missing collection is not a gap to be filled in but the
+    /// truth about that household — there was no calendar to have — so
+    /// migrating is restamping the version rather than transforming the
+    /// contents. That is only true because ``HouseholdSnapshot`` decodes an
+    /// absent collection as an empty one; if it threw instead, every one of
+    /// these steps would have to rebuild the snapshot by hand.
     ///
     /// - Throws: ``ArchiveError/unsupportedVersion(_:)`` for a version between
     ///   zero and current that no migration step knows about, which can only
@@ -127,7 +130,7 @@ public struct HouseholdArchive: Sendable, Codable {
         switch schemaVersion {
         case FamilyHubStore.schemaVersion:
             return self
-        case 1:
+        case 1, 2:
             return HouseholdArchive(
                 snapshot: snapshot,
                 exportedAt: exportedAt,

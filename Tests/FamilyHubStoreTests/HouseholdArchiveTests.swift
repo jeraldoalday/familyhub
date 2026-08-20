@@ -136,25 +136,50 @@ struct HouseholdArchiveTests {
 
     // MARK: Reading what an older build wrote
 
-    /// Rewrites an archive the way the build that wrote version 1 would have:
-    /// with no `plannedMeals` key at all, rather than an empty one.
+    /// Rewrites an archive the way an older build would have: stamped with
+    /// that version and with the keys it had never heard of removed entirely,
+    /// rather than present and empty.
     ///
-    /// Removing the key is what makes the tests below migration tests. Encoding
-    /// an empty array and reading it back only proves that the current encoder
-    /// can read itself, which it could do against a migration that does not
-    /// work.
-    private func version1Data(from snapshot: HouseholdSnapshot) throws -> Data {
+    /// Removing the keys is what makes the tests below migration tests.
+    /// Encoding an empty array and reading it back only proves that the
+    /// current encoder can read itself, which it could do against a migration
+    /// that does not work.
+    ///
+    /// - Parameters:
+    ///   - snapshot: The household to write out.
+    ///   - version: The schema version to claim.
+    ///   - missingKeys: The snapshot keys that version had never written.
+    /// - Returns: The bytes that build would have produced.
+    /// - Throws: Whatever encoding or re-serialising the archive throws.
+    private func archiveData(
+        from snapshot: HouseholdSnapshot,
+        version: Int,
+        missingKeys: [String]
+    ) throws -> Data {
         var cleared = snapshot
-        cleared.plannedMeals = []
+        if missingKeys.contains("plannedMeals") { cleared.plannedMeals = [] }
+        if missingKeys.contains("events") { cleared.events = [] }
         let archive = HouseholdArchive(
-            snapshot: cleared, exportedAt: clock.now, schemaVersion: 1
+            snapshot: cleared, exportedAt: clock.now, schemaVersion: version
         )
         let object = try JSONSerialization.jsonObject(with: try archive.encoded())
         var top = try #require(object as? [String: Any])
         var inner = try #require(top["snapshot"] as? [String: Any])
-        inner.removeValue(forKey: "plannedMeals")
+        for key in missingKeys { inner.removeValue(forKey: key) }
         top["snapshot"] = inner
         return try JSONSerialization.data(withJSONObject: top)
+    }
+
+    /// An archive as the build that wrote version 1 would have produced it:
+    /// before the meal plan and before the calendar.
+    private func version1Data(from snapshot: HouseholdSnapshot) throws -> Data {
+        try archiveData(from: snapshot, version: 1, missingKeys: ["plannedMeals", "events"])
+    }
+
+    /// An archive as the build that wrote version 2 would have produced it:
+    /// with a meal plan, but before the calendar.
+    private func version2Data(from snapshot: HouseholdSnapshot) throws -> Data {
+        try archiveData(from: snapshot, version: 2, missingKeys: ["events"])
     }
 
     @Test("A backup taken before meal planning existed still restores")
@@ -387,5 +412,73 @@ struct HouseholdArchiveTests {
         #expect(
             after.agenda(for: clock.today).map(\.id) == before.agenda(for: clock.today).map(\.id)
         )
+    }
+
+    // MARK: The calendar
+
+    @Test("A backup taken before the calendar existed still restores")
+    func version2ArchiveMigrates() throws {
+        let original = try demoSnapshot()
+        let data = try version2Data(from: original)
+        #expect(!(try #require(String(data: data, encoding: .utf8))).contains("\"events\""))
+
+        let restored = try HouseholdArchive.decoded(from: data)
+
+        #expect(restored.schemaVersion == FamilyHubStore.schemaVersion)
+        #expect(restored.snapshot.events.isEmpty)
+        #expect(restored.snapshot.plannedMeals == original.plannedMeals)
+        #expect(restored.snapshot.household == original.household)
+        #expect(restored.snapshot.chores == original.chores)
+    }
+
+    @Test("A version 2 backup restores into a store as a household with a clear calendar")
+    func version2ArchiveRestores() async throws {
+        let original = try demoSnapshot()
+        let migrated = try HouseholdArchive.decoded(from: try version2Data(from: original))
+
+        let store = InMemoryHouseholdStore()
+        try await store.restore(migrated)
+
+        let snapshot = try await store.snapshot(of: original.household.id)
+        #expect(snapshot.events.isEmpty)
+        #expect(snapshot.plannedMeals.count == original.plannedMeals.count)
+    }
+
+    @Test("A version 1 backup skips two versions in one step")
+    func version1ArchiveSkipsToCurrent() throws {
+        let original = try demoSnapshot()
+        let restored = try HouseholdArchive.decoded(from: try version1Data(from: original))
+        #expect(restored.schemaVersion == FamilyHubStore.schemaVersion)
+        #expect(restored.snapshot.events.isEmpty)
+        #expect(restored.snapshot.plannedMeals.isEmpty)
+    }
+
+    @Test("The calendar survives a round trip and a restore")
+    func calendarIsArchived() async throws {
+        var snapshot = try demoSnapshot()
+        let event = try CalendarEvent(
+            householdID: snapshot.household.id,
+            title: "Swimming",
+            location: "Leisure centre",
+            kind: .activity,
+            startDate: clock.today,
+            timing: .at(hour: 16, lasting: 60),
+            recurrence: try .weekly(on: [.monday]),
+            participants: .members([try #require(snapshot.members.last).id]),
+            reminderMinutesBefore: 30,
+            createdBy: try #require(snapshot.members.first).id,
+            createdAt: clock.now,
+            calendar: snapshot.household.calendar()
+        )
+        snapshot.events = [event]
+
+        let archive = HouseholdArchive(snapshot: snapshot, exportedAt: clock.now)
+        let restored = try HouseholdArchive.decoded(from: try archive.encoded())
+        #expect(restored.snapshot.events == [event])
+
+        let store = InMemoryHouseholdStore()
+        try await store.restore(restored)
+        let reloaded = try await store.snapshot(of: snapshot.household.id)
+        #expect(reloaded.events == [event])
     }
 }
