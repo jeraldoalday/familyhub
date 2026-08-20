@@ -27,8 +27,8 @@ and then it stops being faster, for three specific reasons.
 **Testability.** Every rule in this app is about time — recurrence, streaks,
 overdue states, cooldowns. Rules that live on a `@Model` need a container to
 test, which means tests that take seconds instead of microseconds, which in
-practice means tests that do not get written. The 208 tests here run in about
-fifteen milliseconds because none of them touch a database.
+practice means tests that do not get written. The 438 tests here run in under
+half a second because none of them touch a database.
 
 **Replaceability.** Local-only storage today, iCloud sync later. With rules in
 the persistence layer that is a rewrite. With rules in a layer that has never
@@ -68,6 +68,18 @@ immutable, which is what lets two devices merge by union instead of by
 last-write-wins — and last-write-wins on a balance silently discards chores a
 child actually did.
 
+**Authority is checked against an active member.** Removed members are
+tombstones — their record survives so a year of history still names a real
+person — so `requireMember` and `requireActiveMember` are separate calls with
+the difference spelled out. A command with an actor asks the second one; the
+first is for the operations that are *about* somebody who has already left.
+
+**A record's day is normalised on the way in.** A completion's occurrence day
+and a planned meal's day are both stored as the start of the day, so two
+devices recording the same Thursday at different times produce the same key.
+Every collision that survives that is a genuine one, and is resolved rather than
+prevented.
+
 **Writes go through commands.** Views never assemble a record and save it.
 Almost every operation is two or three writes that must agree, and scattering
 those pairs across view models is how a points total ends up disagreeing with
@@ -86,11 +98,25 @@ on every home-screen render. It indexes completions once rather than searching
 per chore, which is the difference between linear and quadratic on a household
 with a year of history.
 
-**Conflict resolution** currently lives in
-`Collection<ChoreCompletion>.deduplicatedByOccurrence()`. It resolves by
-earliest completion with the identifier as tiebreaker, so every device
-converges on the same winner without negotiating. When sync arrives, this is
-the function to revisit first.
+**`MealPlan`** makes the same trade one layer along: meals are indexed by
+day-and-slot in the initialiser, so rendering a week is twenty-one lookups
+rather than seven passes over every meal the household has ever planned.
+
+**Conflict resolution** lives in
+`Collection<ChoreCompletion>.deduplicatedByOccurrence()` and, in the same shape,
+in `Collection<PlannedMeal>.deduplicatedBySlot()`. Both resolve by the earlier
+record with the identifier as tiebreaker, so every device converges on the same
+winner without negotiating. When sync arrives, these are the functions to
+revisit first, and the fact that there are now two of them is the argument for
+extracting the rule rather than writing it a third time.
+
+**A completion that was sent back is not a completion that counts.**
+`Approval.countsAsDone` is one case wider than `countsTowardBalance`: work
+waiting on a parent is done, work an adult rejected is not, and both the agenda
+and the streak calculator have to agree about that. The streak calculator
+filters rejected records *before* deduplicating, because deduplication keeps the
+earliest record of an occurrence and would otherwise collapse a redo onto the
+rejection it replaced.
 
 **Occurrence positions** are the other easy place to make something quadratic.
 A rotating chore's assignee is derived from the occurrence's position counted
@@ -118,6 +144,27 @@ avoid, so the only correct reaction to a change is to reload.
 screen. It subscribes to the feed *before* reading the first snapshot: a change
 landing in that gap costs one redundant render, whereas reading first would
 drop the write entirely.
+
+## Schema versions
+
+`FamilyHubStore.schemaVersion` is stamped into every export, and
+`HouseholdArchive.migrated()` is the ladder that brings an older file up to the
+current shape. Version 2 added the meal plan; version 1 files restore as a
+household with no planned meals, which is not a gap to be filled in but the
+truth about a household that predated the feature.
+
+Two habits keep that cheap. `HouseholdSnapshot` decodes every collection as
+optional-with-empty rather than required, so a backup written before a feature
+existed is readable by the build that adds it — the household itself is still
+required, so a file missing the part that says whose data it is is still
+refused. `ReminderSchedule` does the same for the settings a family has chosen,
+because a record written once and read for years should not lose a preference,
+or fail to decode entirely, over a field added later.
+
+The rule that follows: adding a collection to the snapshot means bumping the
+version, adding a migration case, and testing it against a file with the key
+genuinely absent. Encoding an empty array and reading it back only proves the
+current encoder can read itself.
 
 ## What would need to change for sync
 

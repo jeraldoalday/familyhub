@@ -5,10 +5,10 @@ Two weeks, from a tested domain core to something submittable to App Review.
 ## Where things stand
 
 **Day 1 is done, and then some.** The domain and store layers are complete and
-tested: 344 tests covering recurrence, chore rotation, permissions, the points
+tested: 438 tests covering recurrence, chore rotation, permissions, the points
 ledger, shopping lists, streaks, the weekly recap, workload fairness, reminder
-planning, the command layer, the change feed, and the backup format. `make
-check` builds, tests, and lints in a few seconds.
+planning, meal planning, the command layer, the change feed, and the backup
+format. `make check` builds, tests, and lints in a few seconds.
 
 Some of that was pulled forward out of later days on purpose. Streaks,
 reminders, and the recap are all decisions about *what the app should say*, and
@@ -53,7 +53,9 @@ first build. Expect this to be the largest day of the fortnight.
 
 **Day 4 — the rest of the surface.** Shopping, family settings, member
 management, the approvals queue, and the points history. Same pattern as day 3,
-so it should move faster.
+so it should move faster. The meal plan's week grid is the stretch item here
+rather than a commitment: `MealPlan` already answers everything the grid needs
+to render, so it is a day's view code whenever there is a day for it.
 
 ## Milestone 2 — making it feel finished (days 5–8)
 
@@ -70,10 +72,11 @@ cheaper now than after notifications and widgets depend on the mess.
 
 **Day 7 — notifications.** `ReminderPlanner` already decides what is worth
 saying and when: the morning digest, the approval queue, the streak about to
-break, and the per-person daily cap that keeps the channel from being switched
-off. What is left is the platform half — authorisation, translating each
-`Reminder` into a `UNNotificationRequest`, and re-planning on launch and on
-change. Smaller than it was.
+break, the afternoon nudge to whoever is cooking, the Sunday prompt about next
+week's undecided dinners, and the per-person daily cap that keeps the channel
+from being switched off. What is left is the platform half — authorisation,
+translating each `Reminder` into a `UNNotificationRequest`, and re-planning on
+launch and on change. Smaller than it was.
 
 **Day 8 — widgets and Shortcuts.** A home-screen widget for today's chores and
 a Lock Screen widget for the point balance. App Intents for "add to the
@@ -120,8 +123,13 @@ Cutting these is what makes the rest fit:
   invitation flow, and a support burden that does not fit two weeks. What a
   family can have today is a backup file they carry across themselves, which
   covers the new-phone case without covering the two-phones-at-once one.
-- **Meal planning.** Modelled in the category enum, not built. It is a
-  reasonable 1.1.
+- **A meal planning *interface*.** The domain is built — slots, cooks,
+  ingredients, the week view, the gaps, and the command that turns a planned
+  week into a shopping list — and the tier already sold it, which is why it was
+  finished rather than left half-declared in an enum. What is out of scope is
+  the screen: it lands with the rest of the interface work, and if the fortnight
+  slips it is the first surface to cut, because a family can plan meals through
+  the shopping list they already have.
 - **A family calendar.** Overlaps heavily with the system Calendar app; needs
   its own thinking rather than a fortnight's leftovers.
 - **Android or web.** The domain layer is portable Swift with no Apple

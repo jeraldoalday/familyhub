@@ -2,7 +2,8 @@
 
 A shared organizer for the whole household: chores that rotate fairly, a points
 and rewards system that actually motivates kids, shopping lists everyone can add
-to, meal planning, and a family calendar — all in one native iOS/iPadOS app.
+to, a meal plan that turns itself into the shopping, and a family calendar — all
+in one native iOS/iPadOS app.
 
 > **Status:** in active development. The domain and store layers are complete
 > and tested; the app itself is the remaining work. See
@@ -44,7 +45,7 @@ The domain and store layers build and test with nothing but the Swift toolchain:
 
 ```bash
 make check      # build + test + lint — the pre-commit gate
-make test       # 344 tests
+make test       # 438 tests
 make format     # reformat in place
 make lint       # the exact formatting check CI runs
 ```
@@ -81,9 +82,10 @@ open FamilyHub.xcodeproj   # added in Milestone 2 — see docs/ROADMAP.md
 ```
 Sources/
   FamilyHubCore/
-    Models/            Households, members, chores, completions, rewards, lists
+    Models/            Households, members, chores, completions, rewards,
+                       lists, planned meals
     Scheduling/        Recurrence engine, weekdays, reminder planning
-    Rules/             Permissions, points ledger, streaks, insights
+    Rules/             Permissions, points ledger, streaks, insights, meal plan
     Support/           Identifiers, validation, errors, the injected clock
   FamilyHubStore/      Store contract, in-memory store, commands, change feed,
                        backup format, demo data
@@ -105,9 +107,11 @@ docs/
 | Completions, approval queue, conflict resolution | ✅ complete, tested |
 | Points ledger, rewards, redemption rules | ✅ complete, tested |
 | Shopping lists with aisle grouping | ✅ complete, tested |
+| Meal planning, cooking rota, and the shopping it implies | ✅ complete, tested |
 | Streaks, per chore and per member | ✅ complete, tested |
 | Weekly recap and workload fairness | ✅ complete, tested |
 | Reminder planning (what to say, and when) | ✅ complete, tested |
+| Schema versioning and backup migration | ✅ complete, tested |
 | Command layer over the store | ✅ complete, tested |
 | Change feed and snapshot observation | ✅ complete, tested |
 | Backup, restore, and data export | ✅ complete, tested |
