@@ -452,3 +452,12 @@ public struct FamilyCalendar: Sendable {
             }
     }
 }
+
+// MARK: - Snapshot convenience
+
+extension HouseholdSnapshot {
+    /// The family calendar over this household, ready to query.
+    public var familyCalendar: FamilyCalendar {
+        FamilyCalendar(events: events, engine: engine)
+    }
+}

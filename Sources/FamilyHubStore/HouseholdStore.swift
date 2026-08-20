@@ -78,6 +78,13 @@ public protocol HouseholdStore: Sendable {
     /// Inserts or replaces a shopping item.
     func save(_ item: ShoppingItem) async throws
 
+    /// Inserts or replaces a calendar event.
+    ///
+    /// Written by identifier like everything else, so two parents who both
+    /// move the dentist appointment converge on one appointment rather than
+    /// on two.
+    func save(_ event: CalendarEvent) async throws
+
     /// Inserts or replaces a planned meal.
     ///
     /// Written by identifier like everything else here, so a household that
@@ -96,6 +103,13 @@ public protocol HouseholdStore: Sendable {
 
     /// Permanently removes a shopping item.
     func deleteShoppingItem(_ id: Identifier<ShoppingItem>) async throws
+
+    /// Permanently removes a calendar event.
+    ///
+    /// Rarely the right call — cancelling keeps the entry visible and struck
+    /// through, which is what the UI offers — but an event created by mistake
+    /// has to be erasable, and privacy law requires a genuine delete to exist.
+    func deleteEvent(_ id: Identifier<CalendarEvent>) async throws
 
     /// Permanently removes a planned meal.
     ///
@@ -136,6 +150,13 @@ extension HouseholdStore {
     public func save(meals: [PlannedMeal]) async throws {
         for meal in meals {
             try await save(meal)
+        }
+    }
+
+    /// Saves several calendar events in one go.
+    public func save(events: [CalendarEvent]) async throws {
+        for event in events {
+            try await save(event)
         }
     }
 }

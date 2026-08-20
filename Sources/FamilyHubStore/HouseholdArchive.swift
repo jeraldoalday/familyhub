@@ -288,5 +288,6 @@ extension HouseholdStore {
         }
         try await save(items: snapshot.shoppingItems)
         try await save(meals: snapshot.plannedMeals)
+        try await save(events: snapshot.events)
     }
 }

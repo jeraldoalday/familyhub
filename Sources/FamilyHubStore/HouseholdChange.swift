@@ -28,6 +28,7 @@ public struct HouseholdChange: Sendable, Hashable {
         case shoppingList
         case shoppingItem
         case plannedMeal
+        case calendarEvent
     }
 
     /// What happened to it.
@@ -82,7 +83,8 @@ public struct HouseholdChange: Sendable, Hashable {
     public var affectsAgenda: Bool {
         switch entity {
         case .household, .member, .chore, .completion: true
-        case .ledgerEntry, .reward, .shoppingList, .shoppingItem, .plannedMeal: false
+        case .ledgerEntry, .reward, .shoppingList, .shoppingItem, .plannedMeal, .calendarEvent:
+            false
         }
     }
 
@@ -90,7 +92,9 @@ public struct HouseholdChange: Sendable, Hashable {
     public var affectsBalances: Bool {
         switch entity {
         case .ledgerEntry, .completion, .member: true
-        case .household, .chore, .reward, .shoppingList, .shoppingItem, .plannedMeal: false
+        case .household, .chore, .reward, .shoppingList, .shoppingItem, .plannedMeal,
+            .calendarEvent:
+            false
         }
     }
 
@@ -103,7 +107,25 @@ public struct HouseholdChange: Sendable, Hashable {
     public var affectsMealPlan: Bool {
         switch entity {
         case .plannedMeal, .member, .household: true
-        case .chore, .completion, .ledgerEntry, .reward, .shoppingList, .shoppingItem: false
+        case .chore, .completion, .ledgerEntry, .reward, .shoppingList, .shoppingItem,
+            .calendarEvent:
+            false
+        }
+    }
+
+    /// Whether this change could alter what the calendar shows.
+    ///
+    /// A member matters because events name the people they concern, and a
+    /// name that has changed — or somebody who has left — changes what a week
+    /// reads and who is reported as double-booked. The household matters
+    /// because its calendar decides where a week begins and what timezone four
+    /// o'clock is four o'clock in.
+    public var affectsCalendar: Bool {
+        switch entity {
+        case .calendarEvent, .member, .household: true
+        case .chore, .completion, .ledgerEntry, .reward, .shoppingList, .shoppingItem,
+            .plannedMeal:
+            false
         }
     }
 }
@@ -173,6 +195,13 @@ extension HouseholdChange {
     public static func upserted(_ meal: PlannedMeal) -> HouseholdChange {
         HouseholdChange(
             householdID: meal.householdID, entity: .plannedMeal, recordID: meal.id.rawValue
+        )
+    }
+
+    /// The change recording that `event` was written.
+    public static func upserted(_ event: CalendarEvent) -> HouseholdChange {
+        HouseholdChange(
+            householdID: event.householdID, entity: .calendarEvent, recordID: event.id.rawValue
         )
     }
 

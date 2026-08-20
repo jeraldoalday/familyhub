@@ -42,6 +42,9 @@ public struct HouseholdSnapshot: Sendable, Codable {
     /// The meal plan, one record per decided slot.
     public var plannedMeals: [PlannedMeal]
 
+    /// The family calendar, including events that have been called off.
+    public var events: [CalendarEvent]
+
     /// Creates a snapshot.
     public init(
         household: Household,
@@ -52,7 +55,8 @@ public struct HouseholdSnapshot: Sendable, Codable {
         rewards: [Reward] = [],
         shoppingLists: [ShoppingList] = [],
         shoppingItems: [ShoppingItem] = [],
-        plannedMeals: [PlannedMeal] = []
+        plannedMeals: [PlannedMeal] = [],
+        events: [CalendarEvent] = []
     ) {
         self.household = household
         self.members = members
@@ -63,6 +67,7 @@ public struct HouseholdSnapshot: Sendable, Codable {
         self.shoppingLists = shoppingLists
         self.shoppingItems = shoppingItems
         self.plannedMeals = plannedMeals
+        self.events = events
     }
 
     /// Decodes a snapshot, tolerating collections a previous build never wrote.
@@ -94,6 +99,7 @@ public struct HouseholdSnapshot: Sendable, Codable {
             try container.decodeIfPresent([ShoppingItem].self, forKey: .shoppingItems) ?? []
         self.plannedMeals =
             try container.decodeIfPresent([PlannedMeal].self, forKey: .plannedMeals) ?? []
+        self.events = try container.decodeIfPresent([CalendarEvent].self, forKey: .events) ?? []
     }
 }
 
@@ -108,6 +114,11 @@ extension HouseholdSnapshot {
     /// The chores still in rotation.
     public var activeChores: [Chore] {
         chores.filter(\.isActive)
+    }
+
+    /// The events still on the calendar.
+    public var activeEvents: [CalendarEvent] {
+        events.active
     }
 
     /// The ledger over this household's entries.
@@ -133,6 +144,11 @@ extension HouseholdSnapshot {
     /// Finds a reward by identifier.
     public func reward(_ id: Identifier<Reward>) -> Reward? {
         rewards.first { $0.id == id }
+    }
+
+    /// Finds a calendar event by identifier.
+    public func event(_ id: Identifier<CalendarEvent>) -> CalendarEvent? {
+        events.first { $0.id == id }
     }
 
     /// A chore's schedule as a phrase, in this household's week order.
@@ -199,6 +215,16 @@ extension HouseholdSnapshot {
     public func requireReward(_ id: Identifier<Reward>) throws -> Reward {
         guard let found = reward(id) else {
             throw DomainError.notFound(entity: "Reward", id: id.description)
+        }
+        return found
+    }
+
+    /// Requires a calendar event, throwing if it is gone.
+    ///
+    /// - Throws: ``DomainError/notFound(entity:id:)``.
+    public func requireEvent(_ id: Identifier<CalendarEvent>) throws -> CalendarEvent {
+        guard let found = event(id) else {
+            throw DomainError.notFound(entity: "Event", id: id.description)
         }
         return found
     }
