@@ -32,12 +32,19 @@ build: ## Build the domain and store layers
 test: ## Run the full test suite
 	swift test $(TEST_FLAGS)
 
+# Optimisations surface warnings a debug build hides, and this is the
+# configuration the App Store actually receives.
 .PHONY: release
 release: ## Build with optimisations, as the app target will
 	swift build -c release
 
+# Deliberately the same set of checks CI runs, in the order that fails fastest.
+# The release build is the slow one — about ten seconds on a warm cache — and it
+# is here rather than in a separate target nobody remembers to run, because a
+# gate that agrees with CI except in one place is a gate people learn to skip
+# and then a red X on a pull request that says nothing about the code.
 .PHONY: check
-check: build test lint ## Build, test, and lint — the pre-commit gate
+check: build test lint release ## Build, test, lint, and release-build — the pre-commit gate
 
 .PHONY: clean
 clean: ## Remove build artefacts

@@ -44,11 +44,18 @@ an adapter change, not a rewrite.
 The domain and store layers build and test with nothing but the Swift toolchain:
 
 ```bash
-make check      # build + test + lint — the pre-commit gate
+make check      # build + test + lint + release build — the pre-commit gate
 make test       # 438 tests
 make format     # reformat in place
 make lint       # the exact formatting check CI runs
+make release    # the optimised build CI also runs
 ```
+
+`make check` runs every check CI runs, in the order that fails fastest. The
+release build is the slow part of it, at around ten seconds on a warm cache, and
+it is included rather than left to a target nobody remembers: optimisations
+surface warnings a debug build hides, and a local gate that agrees with CI
+except in one place is a gate people learn to skip.
 
 ### Formatting
 
