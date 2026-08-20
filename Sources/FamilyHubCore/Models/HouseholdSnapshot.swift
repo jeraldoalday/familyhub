@@ -135,6 +135,17 @@ extension HouseholdSnapshot {
         rewards.first { $0.id == id }
     }
 
+    /// A chore's schedule as a phrase, in this household's week order.
+    ///
+    /// The rule can render itself, but only a caller holding the household
+    /// knows which day its week starts on — and a row that asks the rule
+    /// directly gets the device's locale, which is not the same thing for a
+    /// family that has chosen otherwise. Answering it here is what stops each
+    /// screen having to remember.
+    public func scheduleSummary(of chore: Chore) -> String {
+        chore.recurrence.summary(firstWeekday: household.firstWeekday)
+    }
+
     /// The items on one list.
     public func items(on listID: Identifier<ShoppingList>) -> [ShoppingItem] {
         shoppingItems.filter { $0.listID == listID }

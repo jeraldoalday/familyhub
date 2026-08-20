@@ -189,15 +189,20 @@ extension RecurrenceRule {
 // MARK: - Description
 
 extension RecurrenceRule {
-    /// A short phrase for the chore row: "Daily", "Every 2 weeks on Mon, Thu".
-    public var summary: String {
+    /// A short phrase for the chore row: "Daily", "Every 2 weeks on Mon, Thu",
+    /// with the days in the order the household's week runs.
+    ///
+    /// - Parameter firstWeekday: The day the household starts its week on, as
+    ///   an ISO weekday where Sunday is 1.
+    /// - Returns: The phrase for the chore row.
+    public func summary(firstWeekday: Int) -> String {
         switch frequency {
         case .once:
             return "Once"
         case .daily:
             return interval == 1 ? "Daily" : "Every \(interval) days"
         case .weekly:
-            let days = weekdays.summary
+            let days = weekdays.summary(firstWeekday: firstWeekday)
             if interval == 1 {
                 return weekdays == Weekday.everyDay ? "Daily" : days
             }
@@ -211,6 +216,12 @@ extension RecurrenceRule {
             return interval == 1
                 ? "Monthly on the \(days)" : "Every \(interval) months on the \(days)"
         }
+    }
+
+    /// The summary in the locale's own week order, for callers with no
+    /// household to hand.
+    public var summary: String {
+        summary(firstWeekday: Calendar.current.firstWeekday)
     }
 
     /// Whether the rule can produce more than one occurrence.

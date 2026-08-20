@@ -435,4 +435,64 @@ struct RecurrenceEngineTests {
             ).isEmpty
         )
     }
+
+    // MARK: - Describing a rule
+
+    @Test("A rule lists its days in the order the household's week runs")
+    func summaryFollowsTheHouseholdsWeek() throws {
+        let weekend = try RecurrenceRule.weekly(on: [.saturday, .sunday])
+
+        // Sunday is weekday 1, so sorting by the raw number puts it first —
+        // which is not how a Monday-start household says it.
+        #expect(weekend.summary(firstWeekday: 2).hasPrefix("Weekend"))
+
+        let midweek = try RecurrenceRule.weekly(on: [.sunday, .thursday])
+        #expect(midweek.summary(firstWeekday: 2) == "Thu, Sun")
+        #expect(midweek.summary(firstWeekday: 1) == "Sun, Thu")
+    }
+
+    @Test("The named sets keep their names rather than being listed out")
+    func namedSetsAreNamed() throws {
+        #expect(Weekday.everyDay.summary(firstWeekday: 2) == "Every day")
+        #expect(Weekday.weekdays.summary(firstWeekday: 2) == "Weekdays")
+        #expect(Weekday.weekend.summary(firstWeekday: 2) == "Weekends")
+        #expect(Set<Weekday>().summary(firstWeekday: 2) == "Never")
+    }
+
+    @Test("An interval keeps the week order inside the phrase")
+    func intervalKeepsTheOrder() throws {
+        let fortnightly = try RecurrenceRule.weekly(on: [.sunday, .monday], everyWeeks: 2)
+        #expect(fortnightly.summary(firstWeekday: 2) == "Every 2 weeks on Mon, Sun")
+    }
+
+    @Test("A household describes its own chores in its own week order")
+    func snapshotUsesItsOwnWeekStart() throws {
+        let start = date(2026, 3, 2)
+        let household = try Household(
+            name: "The Aldays", firstWeekday: 2, timeZone: .gmt, createdAt: start
+        )
+        let parent = try Member(
+            householdID: household.id, name: "Jerald", role: .owner, joinedAt: start
+        )
+        let chore = try Chore(
+            householdID: household.id,
+            title: "Bins",
+            startDate: start,
+            recurrence: try .weekly(on: [.sunday, .thursday]),
+            createdBy: parent.id,
+            createdAt: start
+        )
+        let snapshot = HouseholdSnapshot(
+            household: household, members: [parent], chores: [chore]
+        )
+
+        #expect(snapshot.scheduleSummary(of: chore) == "Thu, Sun")
+
+        // The same chore in a household that starts its week on Sunday reads
+        // the other way round, which is the point of asking the household.
+        let sundayStart = HouseholdSnapshot(
+            household: household.withFirstWeekday(1), members: [parent], chores: [chore]
+        )
+        #expect(sundayStart.scheduleSummary(of: chore) == "Sun, Thu")
+    }
 }

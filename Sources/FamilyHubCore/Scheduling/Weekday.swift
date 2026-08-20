@@ -76,11 +76,30 @@ extension Set where Element == Weekday {
     /// A human-readable summary: "Every day", "Weekdays", "Weekends", or a
     /// comma-separated list. Used on the chore row, where there is no room to
     /// spell out a full recurrence description.
-    public var summary: String {
+    ///
+    /// The list runs in the order the household's own week does, which is what
+    /// ``ordered(firstWeekday:)`` exists for. A family whose week starts on
+    /// Monday reads "Sat, Sun"; sorting by the raw weekday number instead gives
+    /// them "Sun, Sat", which is not how anybody says it and reads as a bug in
+    /// the picker they just used.
+    ///
+    /// - Parameter firstWeekday: The day the household starts its week on, as
+    ///   an ISO weekday where Sunday is 1.
+    /// - Returns: The phrase for the chore row.
+    public func summary(firstWeekday: Int) -> String {
         if self == Weekday.everyDay { return "Every day" }
         if self == Weekday.weekdays { return "Weekdays" }
         if self == Weekday.weekend { return "Weekends" }
         if isEmpty { return "Never" }
-        return sorted().map(\.shortName).joined(separator: ", ")
+        return ordered(firstWeekday: firstWeekday).map(\.shortName).joined(separator: ", ")
+    }
+
+    /// The summary in the locale's own week order.
+    ///
+    /// For callers that have no household to hand — a preview, a log line. Code
+    /// rendering a real household should pass its `firstWeekday`, because a
+    /// household may start its week somewhere the device's locale does not.
+    public var summary: String {
+        summary(firstWeekday: Calendar.current.firstWeekday)
     }
 }
