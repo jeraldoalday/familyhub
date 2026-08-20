@@ -24,16 +24,29 @@ public struct Reminder: Sendable, Hashable, Identifiable {
         /// It is somebody's birthday.
         case birthday(memberID: Identifier<Member>)
 
+        /// This person is down to cook tonight.
+        case cookingTonight(mealID: Identifier<PlannedMeal>)
+
+        /// The coming week still has dinners nobody has decided on.
+        case mealPlanGaps(count: Int)
+
         /// How disruptive this kind is allowed to be, lowest first.
         ///
-        /// Used to decide what survives the per-person daily cap. A streak
-        /// about to break outranks a morning list because it is time-critical
-        /// and cannot be acted on tomorrow.
+        /// Used to decide what survives the per-person daily cap. The ladder is
+        /// ordered by how badly the day goes if the reminder is missed rather
+        /// than by how interesting it is. A streak about to break is
+        /// time-critical and cannot be acted on tomorrow, so it outranks
+        /// everything; being down to cook is next, because a cook who finds out
+        /// at seven is a household ordering takeaway; and a week with holes in
+        /// it can be planned any evening, so it sits below a birthday and above
+        /// a list of chores that is also visible on the home screen.
         public var priority: Int {
             switch self {
-            case .streakAtRisk: 3
-            case .approvalsWaiting: 2
-            case .birthday: 1
+            case .streakAtRisk: 5
+            case .cookingTonight: 4
+            case .approvalsWaiting: 3
+            case .birthday: 2
+            case .mealPlanGaps: 1
             case .choresDue: 0
             }
         }
@@ -107,19 +120,65 @@ public struct ReminderSchedule: Hashable, Sendable, Codable {
     /// Whether streak nudges are sent.
     public var sendsStreakNudges: Bool
 
+    /// The hour the cook is reminded that they are cooking.
+    ///
+    /// Mid-afternoon, deliberately. A cook told at seven that they are cooking
+    /// is a household ordering takeaway; told at four, they can still buy
+    /// something on the way home or start the slow bit.
+    public var cookingHour: Int
+
+    /// Whether anything about the meal plan is sent at all.
+    public var sendsMealReminders: Bool
+
     /// Creates a schedule.
     public init(
         morningHour: Int = 8,
         eveningHour: Int = 19,
         maximumPerPersonPerDay: Int = 2,
         sendsMorningDigest: Bool = true,
-        sendsStreakNudges: Bool = true
+        sendsStreakNudges: Bool = true,
+        cookingHour: Int = 16,
+        sendsMealReminders: Bool = true
     ) {
         self.morningHour = min(23, max(0, morningHour))
         self.eveningHour = min(23, max(0, eveningHour))
         self.maximumPerPersonPerDay = max(0, maximumPerPersonPerDay)
         self.sendsMorningDigest = sendsMorningDigest
         self.sendsStreakNudges = sendsStreakNudges
+        self.cookingHour = min(23, max(0, cookingHour))
+        self.sendsMealReminders = sendsMealReminders
+    }
+
+    /// Decodes a schedule saved by an older build.
+    ///
+    /// A settings record is written once and read for years, so a field added
+    /// today is absent from every copy already on a device. Decoding it as
+    /// missing-means-default keeps a family's notification preferences intact
+    /// across the update instead of throwing them away — or, worse, failing to
+    /// decode and leaving the app with no schedule at all.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let standard = ReminderSchedule.standard
+        self.init(
+            morningHour: try container.decodeIfPresent(Int.self, forKey: .morningHour)
+                ?? standard.morningHour,
+            eveningHour: try container.decodeIfPresent(Int.self, forKey: .eveningHour)
+                ?? standard.eveningHour,
+            maximumPerPersonPerDay: try container.decodeIfPresent(
+                Int.self, forKey: .maximumPerPersonPerDay
+            ) ?? standard.maximumPerPersonPerDay,
+            sendsMorningDigest: try container.decodeIfPresent(
+                Bool.self, forKey: .sendsMorningDigest
+            ) ?? standard.sendsMorningDigest,
+            sendsStreakNudges: try container.decodeIfPresent(
+                Bool.self, forKey: .sendsStreakNudges
+            ) ?? standard.sendsStreakNudges,
+            cookingHour: try container.decodeIfPresent(Int.self, forKey: .cookingHour)
+                ?? standard.cookingHour,
+            sendsMealReminders: try container.decodeIfPresent(
+                Bool.self, forKey: .sendsMealReminders
+            ) ?? standard.sendsMealReminders
+        )
     }
 
     /// The default schedule: a morning list and, at most, one evening nudge.
@@ -161,6 +220,7 @@ public struct ReminderPlanner: Sendable {
 
         var planned: [Reminder] = []
         planned.append(contentsOf: morningReminders(on: today, calendar: calendar))
+        planned.append(contentsOf: mealReminders(on: today, calendar: calendar))
         planned.append(
             contentsOf: eveningReminders(on: today, calendar: calendar, streaks: streaks)
         )
@@ -291,6 +351,84 @@ public struct ReminderPlanner: Sendable {
         }
     }
 
+    // MARK: - Meals
+
+    /// What the meal plan is worth saying: who is cooking tonight, and what is
+    /// still undecided for the coming week.
+    ///
+    /// Silent on a plan that does not include meal planning. Nudging a family
+    /// about a feature they have not bought is an advertisement wearing a
+    /// notification's clothes, and it costs the whole channel.
+    private func mealReminders(on day: Date, calendar: Calendar) -> [Reminder] {
+        guard schedule.sendsMealReminders,
+            snapshot.household.tier.includesMealPlanning
+        else { return [] }
+
+        let plan = snapshot.mealPlan
+        var planned: [Reminder] = []
+
+        // Tonight's cook, told while they can still do something about it.
+        if let dinner = plan.meal(on: day, slot: .dinner),
+            let cookID = dinner.cookID,
+            let cook = snapshot.member(cookID),
+            cook.isActive,
+            let fireDate = time(schedule.cookingHour, on: day, calendar: calendar)
+        {
+            planned.append(
+                Reminder(
+                    id: identity(cook.id, day, "cooking-\(dinner.id)", calendar: calendar),
+                    recipientID: cook.id,
+                    fireDate: fireDate,
+                    title: "You're cooking tonight",
+                    body: Self.cookingBody(meal: dinner.title.value),
+                    kind: .cookingTonight(mealID: dinner.id)
+                )
+            )
+        }
+
+        planned.append(contentsOf: planningReminders(on: day, calendar: calendar, plan: plan))
+        return planned
+    }
+
+    /// A nudge, on the household's last day of the week, about the week ahead.
+    ///
+    /// Sent on that day and no other. A prompt about next week's holes is
+    /// useful once, on the evening a family is in a position to sit down and
+    /// fill them; the same prompt on a Wednesday is nagging about something
+    /// they have already decided to do later.
+    ///
+    /// It goes to whoever may actually change the plan, which is a teen or
+    /// above — the same rule the command layer applies. A reminder a child
+    /// cannot act on is noise addressed to the wrong person.
+    private func planningReminders(
+        on day: Date,
+        calendar: Calendar,
+        plan: MealPlan
+    ) -> [Reminder] {
+        let thisWeek = plan.week(containing: day)
+        guard day == thisWeek.end,
+            let firstOfNext = calendar.date(byAdding: .day, value: 1, to: day),
+            let fireDate = time(schedule.eveningHour, on: day, calendar: calendar)
+        else { return [] }
+
+        let nextWeek = plan.week(containing: firstOfNext)
+        let undecidedDinners = nextWeek.days.filter { $0.dinner == nil }.count
+        guard undecidedDinners > 0 else { return [] }
+
+        return snapshot.activeMembers
+            .filter { Permissions.allows(.manageMealPlan, for: $0.role) }
+            .map { planner in
+                Reminder(
+                    id: identity(planner.id, day, "meal-plan", calendar: calendar),
+                    recipientID: planner.id,
+                    fireDate: fireDate,
+                    title: "Next week's meals",
+                    body: Self.mealPlanBody(count: undecidedDinners),
+                    kind: .mealPlanGaps(count: undecidedDinners)
+                )
+            }
+    }
+
     // MARK: - Evening
 
     /// The evening nudge: one per person, naming the streak with most at stake.
@@ -414,6 +552,19 @@ extension ReminderPlanner {
         count == 1
             ? "1 completed chore needs your approval."
             : "\(count) completed chores need your approval."
+    }
+
+    /// Names the meal, so the reminder answers the question it raises. "You're
+    /// cooking tonight" without saying what is a reminder that sends somebody
+    /// to the app to find out.
+    static func cookingBody(meal: String) -> String {
+        "\(meal) is on the plan for tonight."
+    }
+
+    static func mealPlanBody(count: Int) -> String {
+        count == 1
+            ? "1 dinner next week still needs deciding."
+            : "\(count) dinners next week still need deciding."
     }
 
     /// Names the chore and the number, because that is the whole reason this

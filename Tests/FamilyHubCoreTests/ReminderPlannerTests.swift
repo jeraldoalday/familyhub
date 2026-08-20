@@ -15,7 +15,7 @@ struct ReminderPlannerTests {
     )
 
     private struct Fixture {
-        let snapshot: HouseholdSnapshot
+        var snapshot: HouseholdSnapshot
         let parent: Member
         let otherParent: Member
         let sam: Member
@@ -388,5 +388,192 @@ struct ReminderPlannerTests {
         #expect(digests.count == 3)
         #expect(Set(digests.map(\.id)).count == 3)
         #expect(planned.map(\.fireDate) == planned.map(\.fireDate).sorted())
+    }
+
+    // MARK: Meals
+
+    /// Plans a meal into a fixture's snapshot.
+    private func planMeal(
+        in fixture: Fixture,
+        on offset: Int,
+        slot: PlannedMeal.Slot = .dinner,
+        title: String = "Chilli",
+        cook: Member? = nil
+    ) throws -> PlannedMeal {
+        try PlannedMeal(
+            householdID: fixture.snapshot.household.id,
+            day: day(offset),
+            slot: slot,
+            title: title,
+            cookID: cook?.id,
+            plannedBy: fixture.parent.id,
+            createdAt: clock.now,
+            calendar: calendar
+        )
+    }
+
+    @Test("Tonight's cook is told in the afternoon, and told what they are cooking")
+    func cookIsRemindedInTime() throws {
+        var f = try makeFixture()
+        f.snapshot.plannedMeals = [
+            try planMeal(in: f, on: 0, title: "Fish pie", cook: f.otherParent)
+        ]
+
+        let reminders = ReminderPlanner(snapshot: f.snapshot)
+            .reminders(for: day(0), now: clock.now)
+        let cooking = try #require(
+            reminders.first { if case .cookingTonight = $0.kind { true } else { false } }
+        )
+
+        #expect(cooking.recipientID == f.otherParent.id)
+        #expect(hour(of: cooking.fireDate) == ReminderSchedule.standard.cookingHour)
+        // "You're cooking tonight" without saying what sends somebody to the
+        // app to find out, which is a reminder that failed.
+        #expect(cooking.body.contains("Fish pie"))
+    }
+
+    @Test("A dinner with nobody cooking reminds nobody")
+    func noCookNoReminder() throws {
+        var f = try makeFixture()
+        f.snapshot.plannedMeals = [try planMeal(in: f, on: 0)]
+
+        let reminders = ReminderPlanner(snapshot: f.snapshot)
+            .reminders(for: day(0), now: clock.now)
+
+        #expect(!reminders.contains { if case .cookingTonight = $0.kind { true } else { false } })
+    }
+
+    @Test("A household without meal planning is not nudged about it")
+    func freeTierHearsNothingAboutMeals() throws {
+        var f = try makeFixture()
+        f.snapshot.household = f.snapshot.household.onTier(.free)
+        f.snapshot.plannedMeals = [try planMeal(in: f, on: 0, cook: f.otherParent)]
+
+        let reminders = ReminderPlanner(snapshot: f.snapshot)
+            .reminders(for: day(0), now: clock.now)
+
+        // Nudging a family about a feature they have not bought is an
+        // advertisement wearing a notification's clothes.
+        #expect(!reminders.contains { if case .cookingTonight = $0.kind { true } else { false } })
+    }
+
+    @Test("Meal reminders can be switched off without switching everything off")
+    func mealRemindersCanBeSilenced() throws {
+        var f = try makeFixture()
+        f.snapshot.plannedMeals = [try planMeal(in: f, on: 0, cook: f.otherParent)]
+        let schedule = ReminderSchedule(sendsMealReminders: false)
+
+        let reminders = ReminderPlanner(snapshot: f.snapshot, schedule: schedule)
+            .reminders(for: day(0), now: clock.now)
+
+        #expect(!reminders.contains { if case .cookingTonight = $0.kind { true } else { false } })
+        #expect(reminders.contains { if case .choresDue = $0.kind { true } else { false } })
+    }
+
+    @Test("The week ahead is nudged on the last day of this one, and no other")
+    func planningNudgeLandsOnPlanningDay() throws {
+        // The test calendar starts its weeks on Monday, so day 6 is Sunday.
+        let f = try makeFixture()
+        let planner = ReminderPlanner(snapshot: f.snapshot)
+
+        let sunday = planner.reminders(for: day(6), now: clock.now)
+            .filter { if case .mealPlanGaps = $0.kind { true } else { false } }
+        let wednesday = planner.reminders(for: day(2), now: clock.now)
+            .filter { if case .mealPlanGaps = $0.kind { true } else { false } }
+
+        #expect(!sunday.isEmpty)
+        #expect(wednesday.isEmpty)
+        #expect(
+            hour(of: try #require(sunday.first).fireDate)
+                == ReminderSchedule.standard.eveningHour)
+    }
+
+    @Test("The nudge goes to whoever may actually change the plan")
+    func planningNudgeSkipsChildren() throws {
+        let f = try makeFixture()
+        let recipients = ReminderPlanner(snapshot: f.snapshot)
+            .reminders(for: day(6), now: clock.now)
+            .filter { if case .mealPlanGaps = $0.kind { true } else { false } }
+            .map(\.recipientID)
+
+        #expect(Set(recipients) == [f.parent.id, f.otherParent.id])
+        #expect(!recipients.contains(f.sam.id))
+    }
+
+    @Test("A week already planned is not nudged about")
+    func completeWeekIsNotNudged() throws {
+        var f = try makeFixture()
+        // Every dinner of the following week — days 7 through 13.
+        f.snapshot.plannedMeals = try (7...13).map { offset in
+            try planMeal(in: f, on: offset, title: "Dinner \(offset)")
+        }
+
+        let reminders = ReminderPlanner(snapshot: f.snapshot)
+            .reminders(for: day(6), now: clock.now)
+            .filter { if case .mealPlanGaps = $0.kind { true } else { false } }
+
+        #expect(reminders.isEmpty)
+    }
+
+    @Test("The nudge counts the dinners still to decide")
+    func planningNudgeCountsGaps() throws {
+        var f = try makeFixture()
+        f.snapshot.plannedMeals = try (7...12).map { offset in
+            try planMeal(in: f, on: offset, title: "Dinner \(offset)")
+        }
+
+        let reminder = try #require(
+            ReminderPlanner(snapshot: f.snapshot)
+                .reminders(for: day(6), now: clock.now)
+                .first { if case .mealPlanGaps = $0.kind { true } else { false } }
+        )
+
+        #expect(reminder.kind == .mealPlanGaps(count: 1))
+        #expect(reminder.body == "1 dinner next week still needs deciding.")
+    }
+
+    @Test("A cook's night off ranks above the morning list when the cap bites")
+    func cookingSurvivesTheCap() throws {
+        var f = try makeFixture()
+        f.snapshot.plannedMeals = [
+            try planMeal(in: f, on: 0, title: "Fish pie", cook: f.sam)
+        ]
+        let schedule = ReminderSchedule(maximumPerPersonPerDay: 1)
+
+        let kept = ReminderPlanner(snapshot: f.snapshot, schedule: schedule)
+            .reminders(for: day(0), now: clock.now)
+            .filter { $0.recipientID == f.sam.id }
+
+        // Sam has a chore due and is down to cook. Dinner is the one that
+        // cannot be caught up on tomorrow.
+        #expect(kept.count == 1)
+        #expect(kept.first?.kind == .cookingTonight(mealID: f.snapshot.plannedMeals[0].id))
+    }
+
+    // MARK: Saved settings
+
+    @Test("A schedule saved before meal reminders existed still decodes")
+    func olderScheduleDecodes() throws {
+        let json = """
+            {
+              "morningHour": 7,
+              "eveningHour": 20,
+              "maximumPerPersonPerDay": 3,
+              "sendsMorningDigest": false,
+              "sendsStreakNudges": true
+            }
+            """
+        let decoded = try JSONDecoder().decode(
+            ReminderSchedule.self, from: try #require(json.data(using: .utf8))
+        )
+
+        // What the family chose survives the update; what they never saw takes
+        // the default rather than failing to decode at all.
+        #expect(decoded.morningHour == 7)
+        #expect(decoded.eveningHour == 20)
+        #expect(decoded.maximumPerPersonPerDay == 3)
+        #expect(!decoded.sendsMorningDigest)
+        #expect(decoded.cookingHour == ReminderSchedule.standard.cookingHour)
+        #expect(decoded.sendsMealReminders)
     }
 }
