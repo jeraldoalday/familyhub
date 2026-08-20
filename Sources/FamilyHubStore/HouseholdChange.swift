@@ -27,6 +27,7 @@ public struct HouseholdChange: Sendable, Hashable {
         case reward
         case shoppingList
         case shoppingItem
+        case plannedMeal
     }
 
     /// What happened to it.
@@ -51,7 +52,7 @@ public struct HouseholdChange: Sendable, Hashable {
     /// The record's raw identifier.
     ///
     /// A bare `UUID` rather than an `Identifier<Something>`, because a single
-    /// feed carries eight different record types and a phantom parameter cannot
+    /// feed carries every record type in the store and a phantom parameter cannot
     /// vary across them without boxing every element. The typed identifier is
     /// recoverable — `Identifier<Chore>(change.recordID)` — when a caller
     /// already knows the entity, which it does after matching on it.
@@ -81,7 +82,7 @@ public struct HouseholdChange: Sendable, Hashable {
     public var affectsAgenda: Bool {
         switch entity {
         case .household, .member, .chore, .completion: true
-        case .ledgerEntry, .reward, .shoppingList, .shoppingItem: false
+        case .ledgerEntry, .reward, .shoppingList, .shoppingItem, .plannedMeal: false
         }
     }
 
@@ -89,7 +90,20 @@ public struct HouseholdChange: Sendable, Hashable {
     public var affectsBalances: Bool {
         switch entity {
         case .ledgerEntry, .completion, .member: true
-        case .household, .chore, .reward, .shoppingList, .shoppingItem: false
+        case .household, .chore, .reward, .shoppingList, .shoppingItem, .plannedMeal: false
+        }
+    }
+
+    /// Whether this change could alter what is for dinner.
+    ///
+    /// A member matters here because the meal plan names cooks, and a name that
+    /// has changed — or a member who has left — changes what the week grid
+    /// reads. The household matters because its calendar decides where the
+    /// planning week begins.
+    public var affectsMealPlan: Bool {
+        switch entity {
+        case .plannedMeal, .member, .household: true
+        case .chore, .completion, .ledgerEntry, .reward, .shoppingList, .shoppingItem: false
         }
     }
 }
@@ -152,6 +166,13 @@ extension HouseholdChange {
     public static func upserted(_ item: ShoppingItem) -> HouseholdChange {
         HouseholdChange(
             householdID: item.householdID, entity: .shoppingItem, recordID: item.id.rawValue
+        )
+    }
+
+    /// The change recording that `meal` was written.
+    public static func upserted(_ meal: PlannedMeal) -> HouseholdChange {
+        HouseholdChange(
+            householdID: meal.householdID, entity: .plannedMeal, recordID: meal.id.rawValue
         )
     }
 

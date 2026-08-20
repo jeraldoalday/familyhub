@@ -110,19 +110,81 @@ struct HouseholdChangeTests {
             calendar: .testDefault
         )
 
-        let changes = try await collect(5, from: stream) {
+        let meal = try PlannedMeal(
+            householdID: f.household.id, day: clock.today, slot: .dinner,
+            title: "Chilli", plannedBy: f.parent.id, createdAt: clock.now,
+            calendar: .testDefault
+        )
+
+        let changes = try await collect(6, from: stream) {
             try await f.store.save(completion)
             try await f.store.append(.earned(completion))
             try await f.store.save(reward)
             try await f.store.save(list)
             try await f.store.save(item)
+            try await f.store.save(meal)
         }
 
         #expect(
             changes.map(\.entity) == [
-                .completion, .ledgerEntry, .reward, .shoppingList, .shoppingItem,
+                .completion, .ledgerEntry, .reward, .shoppingList, .shoppingItem, .plannedMeal,
             ]
         )
+    }
+
+    @Test("A meal plan screen sleeps through a chore being ticked off")
+    func mealPlanFilterIgnoresChores() async throws {
+        let f = try await makeFixture()
+        let stream = await f.store.snapshots(of: f.household.id, where: \.affectsMealPlan)
+        let meal = try PlannedMeal(
+            householdID: f.household.id, day: clock.today, slot: .dinner,
+            title: "Chilli", plannedBy: f.parent.id, createdAt: clock.now,
+            calendar: .testDefault
+        )
+
+        let collector = Task {
+            var seen: [Int] = []
+            for await snapshot in stream {
+                seen.append(snapshot.plannedMeals.count)
+                if seen.count == 2 { break }
+            }
+            return seen
+        }
+
+        let completion = ChoreCompletion(
+            householdID: f.household.id, choreID: f.chore.id, occurrenceDay: clock.today,
+            completedBy: f.parent.id, completedAt: clock.now, pointsAwarded: 10,
+            calendar: .testDefault
+        )
+        try await f.store.save(completion)
+        try await f.store.save(meal)
+
+        // The first element is the snapshot the stream opens with; the second
+        // is the meal. The completion in between wakes nothing.
+        #expect(await collector.value == [0, 1])
+    }
+
+    @Test("Deleting a meal is reported as a deletion of that record")
+    func deletingAMealIsReported() async throws {
+        let f = try await makeFixture()
+        let meal = try PlannedMeal(
+            householdID: f.household.id, day: clock.today, slot: .dinner,
+            title: "Chilli", plannedBy: f.parent.id, createdAt: clock.now,
+            calendar: .testDefault
+        )
+        try await f.store.save(meal)
+
+        let stream = await f.store.changes(for: f.household.id)
+        let changes = try await collect(1, from: stream) {
+            try await f.store.deletePlannedMeal(meal.id)
+        }
+
+        #expect(changes.first?.entity == .plannedMeal)
+        #expect(changes.first?.operation == .deleted)
+        #expect(changes.first?.recordID == meal.id.rawValue)
+
+        let snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.plannedMeals.isEmpty)
     }
 
     @Test("Another household's writes do not wake this subscriber")

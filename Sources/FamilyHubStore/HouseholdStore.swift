@@ -78,6 +78,13 @@ public protocol HouseholdStore: Sendable {
     /// Inserts or replaces a shopping item.
     func save(_ item: ShoppingItem) async throws
 
+    /// Inserts or replaces a planned meal.
+    ///
+    /// Written by identifier like everything else here, so a household that
+    /// changes its mind about Thursday replaces Thursday rather than
+    /// accumulating a history of dinners it did not have.
+    func save(_ meal: PlannedMeal) async throws
+
     // MARK: Deleting
 
     /// Permanently removes a chore and its completions.
@@ -89,6 +96,13 @@ public protocol HouseholdStore: Sendable {
 
     /// Permanently removes a shopping item.
     func deleteShoppingItem(_ id: Identifier<ShoppingItem>) async throws
+
+    /// Permanently removes a planned meal.
+    ///
+    /// A genuine delete rather than an archive, for the same reason clearing a
+    /// shopping list is one: a plan is a working document, and nobody wants to
+    /// scroll past the dinner they changed their mind about in March.
+    func deletePlannedMeal(_ id: Identifier<PlannedMeal>) async throws
 
     /// Erases a household and everything in it.
     func deleteHousehold(_ id: Identifier<Household>) async throws
@@ -115,6 +129,13 @@ extension HouseholdStore {
     public func save(items: [ShoppingItem]) async throws {
         for item in items {
             try await save(item)
+        }
+    }
+
+    /// Saves several planned meals in one go.
+    public func save(meals: [PlannedMeal]) async throws {
+        for meal in meals {
+            try await save(meal)
         }
     }
 }
