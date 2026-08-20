@@ -39,6 +39,9 @@ public struct HouseholdSnapshot: Sendable, Codable {
     /// Items across all lists.
     public var shoppingItems: [ShoppingItem]
 
+    /// The meal plan, one record per decided slot.
+    public var plannedMeals: [PlannedMeal]
+
     /// Creates a snapshot.
     public init(
         household: Household,
@@ -48,7 +51,8 @@ public struct HouseholdSnapshot: Sendable, Codable {
         ledgerEntries: [LedgerEntry] = [],
         rewards: [Reward] = [],
         shoppingLists: [ShoppingList] = [],
-        shoppingItems: [ShoppingItem] = []
+        shoppingItems: [ShoppingItem] = [],
+        plannedMeals: [PlannedMeal] = []
     ) {
         self.household = household
         self.members = members
@@ -58,6 +62,7 @@ public struct HouseholdSnapshot: Sendable, Codable {
         self.rewards = rewards
         self.shoppingLists = shoppingLists
         self.shoppingItems = shoppingItems
+        self.plannedMeals = plannedMeals
     }
 }
 
