@@ -274,4 +274,67 @@ struct PermissionsTests {
             try Permissions.authorizeApproval(of: completion, by: child)
         }
     }
+
+    // MARK: Calendar authorisation
+
+    @Test("An adult may put something on the whole household's calendar")
+    func adultMayScheduleForEveryone() throws {
+        let parent = try member(.adult, name: "Mary")
+        #expect(throws: Never.self) {
+            try Permissions.authorizeEvent(for: .everyone, by: parent, in: [parent])
+        }
+    }
+
+    @Test("A teen may book only themselves in")
+    func teenMayScheduleOnlyThemselves() throws {
+        let teen = try member(.teen, name: "Alex")
+        let child = try member(.child, name: "Sam")
+        let household = [teen, child]
+
+        #expect(throws: Never.self) {
+            try Permissions.authorizeEvent(
+                for: .members([teen.id]), by: teen, in: household
+            )
+        }
+        #expect(throws: DomainError.notPermitted(action: .manageCalendar, role: .teen)) {
+            try Permissions.authorizeEvent(
+                for: .members([child.id]), by: teen, in: household
+            )
+        }
+        #expect(throws: DomainError.notPermitted(action: .manageCalendar, role: .teen)) {
+            try Permissions.authorizeEvent(
+                for: .members([teen.id, child.id]), by: teen, in: household
+            )
+        }
+        #expect(throws: DomainError.notPermitted(action: .manageCalendar, role: .teen)) {
+            try Permissions.authorizeEvent(for: .everyone, by: teen, in: household)
+        }
+    }
+
+    @Test("A child may not change the calendar even for themselves")
+    func childMayNotSchedule() throws {
+        let child = try member(.child, name: "Sam")
+        #expect(throws: DomainError.notPermitted(action: .manageCalendar, role: .child)) {
+            try Permissions.authorizeEvent(
+                for: .members([child.id]), by: child, in: [child]
+            )
+        }
+    }
+
+    @Test("An event may not name somebody who has left, or somebody who was never here")
+    func participantsMustBeInTheHousehold() throws {
+        let parent = try member(.adult, name: "Mary")
+        let gone = try member(.child, name: "Sam").removed(at: date(2026, 2, 1))
+
+        #expect(throws: DomainError.memberNotInHousehold(gone.id)) {
+            try Permissions.authorizeEvent(
+                for: .members([gone.id]), by: parent, in: [parent, gone]
+            )
+        }
+        #expect(throws: DomainError.self) {
+            try Permissions.authorizeEvent(
+                for: .members([Identifier<Member>()]), by: parent, in: [parent]
+            )
+        }
+    }
 }

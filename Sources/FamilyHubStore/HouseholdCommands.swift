@@ -982,6 +982,272 @@ public struct HouseholdCommands: Sendable {
         return added
     }
 
+    // MARK: - The calendar
+
+    /// Puts something on the family calendar.
+    ///
+    /// - Parameters:
+    ///   - householdID: Whose calendar to put it on.
+    ///   - title: What is happening.
+    ///   - notes: Anything worth knowing.
+    ///   - location: Where it is.
+    ///   - kind: The grouping it belongs to.
+    ///   - day: The first day it happens. Defaults to today.
+    ///   - timing: When in the day. All day unless said otherwise.
+    ///   - recurrence: How often it comes around. Once unless said otherwise.
+    ///   - participants: Who it concerns. Everybody unless said otherwise.
+    ///   - reminderMinutesBefore: How far ahead to speak up, if at all.
+    ///   - actorID: Who is putting it on.
+    /// - Returns: The event.
+    /// - Throws: ``DomainError/notPermitted(action:role:)`` when the actor may
+    ///   not change the calendar or may not name the people they have named,
+    ///   ``DomainError/memberNotInHousehold(_:)`` when one of them has left, or
+    ///   a validation error from ``CalendarEvent``.
+    @discardableResult
+    public func scheduleEvent(
+        in householdID: Identifier<Household>,
+        title: String,
+        notes: String? = nil,
+        location: String? = nil,
+        kind: CalendarEvent.Kind = .other,
+        on day: Date? = nil,
+        timing: CalendarEvent.Timing = .allDay,
+        recurrence: RecurrenceRule = .once,
+        participants: CalendarEvent.Participants = .everyone,
+        reminderMinutesBefore: Int? = nil,
+        by actorID: Identifier<Member>
+    ) async throws -> CalendarEvent {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireActiveMember(actorID)
+        try Permissions.authorizeEvent(for: participants, by: actor, in: snapshot.members)
+
+        let event = try CalendarEvent(
+            householdID: householdID,
+            title: title,
+            notes: notes,
+            location: location,
+            kind: kind,
+            startDate: day ?? dateProvider.now,
+            timing: timing,
+            recurrence: recurrence,
+            participants: participants,
+            reminderMinutesBefore: reminderMinutesBefore,
+            createdBy: actorID,
+            createdAt: dateProvider.now,
+            calendar: snapshot.household.calendar()
+        )
+        try await store.save(event)
+        return event
+    }
+
+    /// Edits an event, leaving anything not named alone.
+    ///
+    /// One command rather than eight, for the reason ``updateChore`` is one
+    /// rather than six: an event editor saves every field at once, and eight
+    /// commands would mean eight writes, eight change notifications, and a
+    /// window in which half the edit is live.
+    ///
+    /// The optional fields — notes, location, and the reminder lead — take a
+    /// double optional so that "leave this alone" and "clear it" stay
+    /// distinguishable: omit the parameter for the former, pass `.some(nil)`
+    /// for the latter.
+    ///
+    /// - Parameters:
+    ///   - eventID: The event to edit.
+    ///   - householdID: Whose calendar it is on.
+    ///   - actorID: Who is editing it.
+    ///   - title: A new title.
+    ///   - notes: New notes, or `.some(nil)` to clear them.
+    ///   - location: A new location, or `.some(nil)` to clear it.
+    ///   - kind: A new grouping.
+    ///   - timing: A new time of day.
+    ///   - participants: New people.
+    ///   - reminderMinutesBefore: A new lead, or `.some(nil)` for silence.
+    /// - Returns: The edited event.
+    /// - Throws: ``DomainError/notPermitted(action:role:)``,
+    ///   ``DomainError/notFound(entity:id:)``, or a validation error from the
+    ///   new values.
+    @discardableResult
+    public func updateEvent(
+        _ eventID: Identifier<CalendarEvent>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>,
+        title: String? = nil,
+        notes: String?? = nil,
+        location: String?? = nil,
+        kind: CalendarEvent.Kind? = nil,
+        timing: CalendarEvent.Timing? = nil,
+        participants: CalendarEvent.Participants? = nil,
+        reminderMinutesBefore: Int?? = nil
+    ) async throws -> CalendarEvent {
+        try await updatingEvent(eventID, in: householdID, by: actorID) { event, actor, snapshot in
+            // Checked against the people the event *would* concern, not the
+            // ones it does. A teen widening their own swimming lesson into a
+            // household-wide entry is the same act as creating one, and the
+            // check that stops the second has to stop the first.
+            if let participants {
+                try Permissions.authorizeEvent(for: participants, by: actor, in: snapshot.members)
+            }
+
+            var updated = event
+            if let title { updated = try updated.retitled(to: title) }
+            if let notes { updated = try updated.withNotes(notes) }
+            if let location { updated = try updated.at(location) }
+            if let kind { updated = updated.ofKind(kind) }
+            if let timing { updated = try updated.timed(timing) }
+            if let participants { updated = updated.attendedBy(participants) }
+            if let reminderMinutesBefore {
+                updated = try updated.reminding(minutesBefore: reminderMinutesBefore)
+            }
+            return updated
+        }
+    }
+
+    /// Moves an event to another day, or changes how often it comes around.
+    ///
+    /// - Parameters:
+    ///   - eventID: The event to move.
+    ///   - day: The day it now starts on, if it is moving.
+    ///   - recurrence: How often it now comes around, if that is changing.
+    ///   - householdID: Whose calendar it is on.
+    ///   - actorID: Who is moving it.
+    /// - Returns: The moved event.
+    /// - Throws: ``DomainError/notPermitted(action:role:)`` or
+    ///   ``DomainError/notFound(entity:id:)``.
+    @discardableResult
+    public func rescheduleEvent(
+        _ eventID: Identifier<CalendarEvent>,
+        to day: Date? = nil,
+        recurrence: RecurrenceRule? = nil,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> CalendarEvent {
+        try await updatingEvent(eventID, in: householdID, by: actorID) { event, _, snapshot in
+            event.rescheduled(
+                startingOn: day,
+                recurrence: recurrence,
+                calendar: snapshot.household.calendar()
+            )
+        }
+    }
+
+    /// Drops one day of a recurring event — a cancelled lesson, a week away.
+    ///
+    /// Recorded as an exception rather than by editing the schedule, so
+    /// "swimming was off that week" does not permanently move swimming.
+    ///
+    /// - Parameters:
+    ///   - eventID: The event to drop a day of.
+    ///   - day: The day to drop.
+    ///   - householdID: Whose calendar it is on.
+    ///   - actorID: Who is dropping it.
+    /// - Returns: The event.
+    /// - Throws: ``DomainError/notPermitted(action:role:)`` or
+    ///   ``DomainError/notFound(entity:id:)``.
+    @discardableResult
+    public func skipEvent(
+        _ eventID: Identifier<CalendarEvent>,
+        on day: Date,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> CalendarEvent {
+        try await updatingEvent(eventID, in: householdID, by: actorID) { event, _, snapshot in
+            event.skipping(day, calendar: snapshot.household.calendar())
+        }
+    }
+
+    /// Puts a dropped day back on the schedule.
+    ///
+    /// - Parameters:
+    ///   - eventID: The event to restore a day of.
+    ///   - day: The day to restore.
+    ///   - householdID: Whose calendar it is on.
+    ///   - actorID: Who is restoring it.
+    /// - Returns: The event.
+    /// - Throws: ``DomainError/notPermitted(action:role:)`` or
+    ///   ``DomainError/notFound(entity:id:)``.
+    @discardableResult
+    public func unskipEvent(
+        _ eventID: Identifier<CalendarEvent>,
+        on day: Date,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> CalendarEvent {
+        try await updatingEvent(eventID, in: householdID, by: actorID) { event, _, snapshot in
+            event.unskipping(day, calendar: snapshot.household.calendar())
+        }
+    }
+
+    /// Calls an event off without erasing it.
+    ///
+    /// Cancelling rather than deleting is what the UI offers, for the reason
+    /// archiving a chore is: a family that cancels the dentist wants it off
+    /// the week, not off the record.
+    ///
+    /// - Parameters:
+    ///   - eventID: The event to call off.
+    ///   - householdID: Whose calendar it is on.
+    ///   - actorID: Who is calling it off.
+    /// - Returns: The cancelled event.
+    /// - Throws: ``DomainError/notPermitted(action:role:)`` or
+    ///   ``DomainError/notFound(entity:id:)``.
+    @discardableResult
+    public func cancelEvent(
+        _ eventID: Identifier<CalendarEvent>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> CalendarEvent {
+        let now = dateProvider.now
+        return try await updatingEvent(eventID, in: householdID, by: actorID) { event, _, _ in
+            event.cancelled(at: now)
+        }
+    }
+
+    /// Puts a cancelled event back on the calendar.
+    ///
+    /// - Parameters:
+    ///   - eventID: The event to put back.
+    ///   - householdID: Whose calendar it is on.
+    ///   - actorID: Who is putting it back.
+    /// - Returns: The reinstated event.
+    /// - Throws: ``DomainError/notPermitted(action:role:)`` or
+    ///   ``DomainError/notFound(entity:id:)``.
+    @discardableResult
+    public func reinstateEvent(
+        _ eventID: Identifier<CalendarEvent>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> CalendarEvent {
+        try await updatingEvent(eventID, in: householdID, by: actorID) { event, _, _ in
+            event.reinstated()
+        }
+    }
+
+    /// Erases an event and every trace of it.
+    ///
+    /// Restricted to whoever can manage the household, and separate from
+    /// cancelling on purpose. This is the destructive one, and it exists
+    /// because an event created by mistake should be removable and because
+    /// privacy law requires a genuine delete to be possible.
+    ///
+    /// - Parameters:
+    ///   - eventID: The event to erase.
+    ///   - householdID: Whose calendar it is on.
+    ///   - actorID: Who is erasing it.
+    /// - Throws: ``DomainError/notPermitted(action:role:)`` or
+    ///   ``DomainError/notFound(entity:id:)``.
+    public func deleteEvent(
+        _ eventID: Identifier<CalendarEvent>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireActiveMember(actorID)
+        _ = try snapshot.requireEvent(eventID)
+        try Permissions.check(.manageHousehold, for: actor.role)
+        try await store.deleteEvent(eventID)
+    }
+
     // MARK: - Shared plumbing
 
     /// Refuses an operation the household's plan does not include.
@@ -1017,6 +1283,37 @@ public struct HouseholdCommands: Sendable {
             throw DomainError.notFound(entity: "Meal", id: mealID.description)
         }
         let updated = try transform(meal, snapshot)
+        try await store.save(updated)
+        return updated
+    }
+
+    /// Loads an event, applies a transform, and saves the result.
+    ///
+    /// Every calendar edit is load, check, transform, save, and the seven of
+    /// them differ only in the transform. Sharing the rest is what keeps the
+    /// permission check from being present on six and missing from the
+    /// seventh.
+    ///
+    /// The transform receives the actor as well as the snapshot, because the
+    /// one edit that needs a second check — changing who an event concerns —
+    /// needs to know who is asking.
+    private func updatingEvent(
+        _ eventID: Identifier<CalendarEvent>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>,
+        _ transform: (CalendarEvent, Member, HouseholdSnapshot) throws -> CalendarEvent
+    ) async throws -> CalendarEvent {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireActiveMember(actorID)
+        let event = try snapshot.requireEvent(eventID)
+        // Checked against the people the event already concerns, so a teen
+        // cannot edit their sibling's dentist appointment merely because they
+        // are not touching the participant list.
+        try Permissions.authorizeEvent(
+            for: event.participants, by: actor, in: snapshot.members
+        )
+
+        let updated = try transform(event, actor, snapshot)
         try await store.save(updated)
         return updated
     }

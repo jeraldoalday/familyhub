@@ -126,6 +126,56 @@ extension Permissions {
         try check(action, for: member.role)
     }
 
+    /// Whether `member` may put an event concerning `participants` on the
+    /// calendar.
+    ///
+    /// Changing the calendar at all is a teen-and-above action, because an
+    /// older child is old enough to keep their own commitments on it and more
+    /// likely to keep to a schedule they wrote. Putting something on *somebody
+    /// else's* day is not the same act: a teenager who can book their sibling
+    /// into a dentist appointment, or declare a whole-household half term, is
+    /// a family argument the app started.
+    ///
+    /// The same distinction the chore commands draw between assigning work to
+    /// yourself and assigning it to somebody else, and drawn here rather than
+    /// in the command layer so a view asking "should I offer this?" and a
+    /// command asking "may I do this?" cannot answer differently.
+    ///
+    /// - Parameters:
+    ///   - participants: Who the event would concern.
+    ///   - member: The person trying to save it.
+    ///   - members: The household's members, for checking the named ones are
+    ///     still in it.
+    /// - Throws: ``DomainError/notPermitted(action:role:)`` when the member may
+    ///   not change the calendar or may not name the people they have named, or
+    ///   ``DomainError/memberNotInHousehold(_:)`` when one of them has left.
+    public static func authorizeEvent(
+        for participants: CalendarEvent.Participants,
+        by member: Member,
+        in members: some Collection<Member>
+    ) throws {
+        try check(.manageCalendar, for: member.role)
+
+        // An event naming only yourself is yours to book whatever your role.
+        // Anything wider — another person, or the whole household — is an
+        // adult's to declare.
+        let named = participants.namedMemberIDs
+        for memberID in named {
+            guard let found = members.first(where: { $0.id == memberID }) else {
+                throw DomainError.notFound(entity: "Member", id: memberID.description)
+            }
+            // Active, not merely on file. An event that still names somebody
+            // who has moved out shows a name on a week nobody can act on.
+            guard found.isActive else {
+                throw DomainError.memberNotInHousehold(memberID)
+            }
+        }
+
+        let concernsOnlyThemselves = named == [member.id]
+        guard !concernsOnlyThemselves, !member.role.isAdult else { return }
+        throw DomainError.notPermitted(action: .manageCalendar, role: member.role)
+    }
+
     /// Whether `member` may approve a completion.
     ///
     /// - Throws: ``DomainError/notPermitted(action:role:)`` for a non-adult, or
