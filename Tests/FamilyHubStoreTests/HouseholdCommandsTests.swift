@@ -285,6 +285,53 @@ struct HouseholdCommandsTests {
         #expect(snapshot.ledger.balance(for: f.child.id) == 0)
     }
 
+    @Test("A chore sent back can be done again")
+    func rejectedChoreCanBeRedone() async throws {
+        let f = try await makeFixture(requiresApproval: true)
+        let first = try await f.commands.completeChore(
+            f.chore.id, on: clock.today, in: f.household.id, by: f.child.id
+        )
+        try await f.commands.rejectCompletion(
+            first.id, in: f.household.id, by: f.parent.id, reason: "Bin still full"
+        )
+
+        let redo = try await f.commands.completeChore(
+            f.chore.id, on: clock.today, in: f.household.id, by: f.child.id
+        )
+        #expect(redo.approval == .pending)
+
+        // The redo supersedes the rejection rather than sitting beside it, so
+        // the occurrence is still one row and one thing for a parent to review.
+        let snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.completions.count == 1)
+        #expect(redo.id == first.id)
+        #expect(snapshot.reviewQueue.count == 1)
+
+        try await f.commands.approveCompletion(
+            redo.id, in: f.household.id, by: f.parent.id
+        )
+        let settled = try await f.store.snapshot(of: f.household.id)
+        #expect(settled.ledger.balance(for: f.child.id) == 10)
+        #expect(settled.ledgerEntries.count == 1)
+    }
+
+    @Test("A completion that was not rejected still refuses a second attempt")
+    func acceptedChoreCannotBeRedone() async throws {
+        let f = try await makeFixture(requiresApproval: true)
+        let first = try await f.commands.completeChore(
+            f.chore.id, on: clock.today, in: f.household.id, by: f.child.id
+        )
+        try await f.commands.approveCompletion(
+            first.id, in: f.household.id, by: f.parent.id
+        )
+
+        await #expect(throws: DomainError.alreadyCompleted) {
+            try await f.commands.completeChore(
+                f.chore.id, on: clock.today, in: f.household.id, by: f.child.id
+            )
+        }
+    }
+
     @Test("An adult's own chore skips the approval queue")
     func adultsSkipApproval() async throws {
         // Requiring a parent to approve their own washing-up is ceremony, and

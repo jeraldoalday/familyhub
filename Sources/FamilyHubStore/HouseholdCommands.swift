@@ -332,9 +332,13 @@ public struct HouseholdCommands: Sendable {
     /// the ledger entry that pays for it. The two are written together here so
     /// they cannot come apart.
     ///
+    /// An occurrence an adult sent back may be completed again; the new record
+    /// replaces the rejected one in place.
+    ///
     /// - Throws: ``DomainError/notScheduled(on:)`` if the chore does not fall
     ///   on that day, ``DomainError/alreadyCompleted`` if the occurrence is
-    ///   already recorded, ``DomainError/notPermitted(action:role:)``, or
+    ///   already recorded and was not rejected,
+    ///   ``DomainError/notPermitted(action:role:)``, or
     ///   ``DomainError/notFound(entity:id:)``.
     @discardableResult
     public func completeChore(
@@ -370,13 +374,22 @@ public struct HouseholdCommands: Sendable {
 
         // Guards the double-tap and the two-devices case alike. Without it the
         // same Tuesday pays out twice.
+        //
+        // A rejected record is the one exception: it is an instruction to do
+        // the work again, so it does not block the second attempt. The redo
+        // reuses its identifier rather than adding a record beside it, because
+        // every store here writes by identifier — one occurrence stays one row,
+        // the rejection is superseded rather than left to argue with its own
+        // replacement, and a redo replayed by a sync retry still converges.
         let key = ChoreCompletion.OccurrenceKey(choreID: choreID, day: normalizedDay)
-        guard !snapshot.completions.contains(where: { $0.occurrenceKey == key }) else {
+        let existing = snapshot.completions.first { $0.occurrenceKey == key }
+        if let existing, !existing.approval.isRejected {
             throw DomainError.alreadyCompleted
         }
 
         let needsApproval = snapshot.household.requiresApproval && !member.role.isAdult
         let completion = ChoreCompletion(
+            id: existing?.id ?? Identifier(),
             householdID: householdID,
             choreID: choreID,
             occurrenceDay: normalizedDay,
