@@ -72,6 +72,9 @@ public enum Limits {
     /// Longest permitted chore title.
     public static let choreTitleLength = 80
 
+    /// Longest permitted meal title.
+    public static let mealTitleLength = 80
+
     /// Longest permitted free-text notes field.
     public static let notesLength = 500
 
@@ -80,6 +83,15 @@ public enum Limits {
 
     /// Points a reward may cost.
     public static let pointsPerReward: ClosedRange<Int> = 1...100_000
+
+    /// How many people a planned meal may be for. The upper bound is a
+    /// typo guard rather than a real limit — a household cooking for more than
+    /// fifty is catering, and the number is far more likely to be a slip.
+    public static let servings: ClosedRange<Int> = 1...50
+
+    /// How many ingredients one planned meal may list. Generous for a recipe
+    /// and low enough that a paste of somebody's entire cookbook is refused.
+    public static let ingredientsPerMeal = 30
 
     /// Quantity of a single shopping list item.
     public static let itemQuantity: ClosedRange<Int> = 1...999

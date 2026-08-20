@@ -94,6 +94,8 @@ extension DomainError {
         case listName
         case itemName
         case rewardName
+        case mealTitle
+        case mealNotes
         case eventTitle
         case points
         case quantity
@@ -189,6 +191,8 @@ extension DomainError.Field {
         case .listName: "List name"
         case .itemName: "Item name"
         case .rewardName: "Reward name"
+        case .mealTitle: "Meal"
+        case .mealNotes: "Meal notes"
         case .eventTitle: "Event title"
         case .points: "Points"
         case .quantity: "Quantity"
