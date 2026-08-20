@@ -136,67 +136,59 @@ struct HouseholdArchiveTests {
 
     // MARK: Reading what an older build wrote
 
+    /// Rewrites an archive the way the build that wrote version 1 would have:
+    /// with no `plannedMeals` key at all, rather than an empty one.
+    ///
+    /// Removing the key is what makes the tests below migration tests. Encoding
+    /// an empty array and reading it back only proves that the current encoder
+    /// can read itself, which it could do against a migration that does not
+    /// work.
+    private func version1Data(from snapshot: HouseholdSnapshot) throws -> Data {
+        var cleared = snapshot
+        cleared.plannedMeals = []
+        let archive = HouseholdArchive(
+            snapshot: cleared, exportedAt: clock.now, schemaVersion: 1
+        )
+        let object = try JSONSerialization.jsonObject(with: try archive.encoded())
+        var top = try #require(object as? [String: Any])
+        var inner = try #require(top["snapshot"] as? [String: Any])
+        inner.removeValue(forKey: "plannedMeals")
+        top["snapshot"] = inner
+        return try JSONSerialization.data(withJSONObject: top)
+    }
+
     @Test("A backup taken before meal planning existed still restores")
     func version1ArchiveMigrates() throws {
-        // The genuine article: a version 1 file has no `plannedMeals` key at
-        // all, because the build that wrote it had never heard of one. Stripping
-        // the key is what makes this a migration test rather than a test that
-        // the current encoder can read itself.
-        let archive = HouseholdArchive(
-            snapshot: try demoSnapshot(), exportedAt: clock.now, schemaVersion: 1
-        )
-        let json = try #require(String(data: try archive.encoded(), encoding: .utf8))
-        let stripped = json.replacingOccurrences(
-            of: "\"plannedMeals\" : [\n\n    ],\n    ",
-            with: ""
-        )
-        #expect(!stripped.contains("plannedMeals"))
+        let original = try demoSnapshot()
+        let data = try version1Data(from: original)
+        #expect(!(try #require(String(data: data, encoding: .utf8))).contains("plannedMeals"))
 
-        let restored = try HouseholdArchive.decoded(
-            from: try #require(stripped.data(using: .utf8))
-        )
+        let restored = try HouseholdArchive.decoded(from: data)
 
         #expect(restored.schemaVersion == FamilyHubStore.schemaVersion)
         #expect(restored.snapshot.plannedMeals.isEmpty)
-        #expect(restored.snapshot.household == archive.snapshot.household)
-        #expect(restored.snapshot.chores == archive.snapshot.chores)
-        #expect(restored.snapshot.ledgerEntries == archive.snapshot.ledgerEntries)
+        #expect(restored.snapshot.household == original.household)
+        #expect(restored.snapshot.chores == original.chores)
+        #expect(restored.snapshot.ledgerEntries == original.ledgerEntries)
     }
 
     @Test("A version 1 backup restores into a store as a household with no plan")
     func version1ArchiveRestores() async throws {
-        let archive = HouseholdArchive(
-            snapshot: try demoSnapshot(), exportedAt: clock.now, schemaVersion: 1
-        )
-        let migrated = try HouseholdArchive.decoded(from: try archive.encoded())
+        let original = try demoSnapshot()
+        let migrated = try HouseholdArchive.decoded(from: try version1Data(from: original))
 
         let store = InMemoryHouseholdStore()
         try await store.restore(migrated)
 
-        let snapshot = try await store.snapshot(of: archive.snapshot.household.id)
+        let snapshot = try await store.snapshot(of: original.household.id)
         #expect(snapshot.plannedMeals.isEmpty)
-        #expect(snapshot.members.count == archive.snapshot.members.count)
+        #expect(snapshot.members.count == original.members.count)
     }
 
     @Test("The meal plan survives a round trip and a restore")
     func mealPlanIsArchived() async throws {
-        var snapshot = try demoSnapshot()
-        let cook = try #require(snapshot.activeMembers.first)
-        snapshot.plannedMeals = [
-            try PlannedMeal(
-                householdID: snapshot.household.id,
-                day: clock.today,
-                slot: .dinner,
-                title: "Chilli",
-                notes: "Mild for Sam",
-                cookID: cook.id,
-                ingredients: ["Mince", "Kidney beans"],
-                servings: 4,
-                plannedBy: cook.id,
-                createdAt: clock.now,
-                calendar: .testDefault
-            )
-        ]
+        let snapshot = try demoSnapshot()
+        #expect(!snapshot.plannedMeals.isEmpty)
 
         let archive = HouseholdArchive(snapshot: snapshot, exportedAt: clock.now)
         let restored = try HouseholdArchive.decoded(from: try archive.encoded())
@@ -206,8 +198,12 @@ struct HouseholdArchiveTests {
         try await store.restore(restored)
         let reloaded = try await store.snapshot(of: snapshot.household.id)
 
-        #expect(reloaded.plannedMeals == snapshot.plannedMeals)
-        #expect(reloaded.mealPlan.meal(on: clock.today, slot: .dinner)?.title.value == "Chilli")
+        #expect(
+            reloaded.plannedMeals.sortedForDisplay() == snapshot.plannedMeals.sortedForDisplay())
+        #expect(
+            reloaded.mealPlan.meal(on: clock.today, slot: .dinner)?.title.value
+                == snapshot.mealPlan.meal(on: clock.today, slot: .dinner)?.title.value
+        )
     }
 
     @Test("Every archive error explains itself to a person")

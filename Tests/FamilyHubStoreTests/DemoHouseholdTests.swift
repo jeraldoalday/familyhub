@@ -118,4 +118,65 @@ struct DemoHouseholdTests {
         #expect(after.reviewQueue.isEmpty)
         #expect(after.ledger.balance(for: pending.completedBy) > 0)
     }
+
+    // MARK: The meal plan
+
+    @Test("This week's meals are planned, but not every one of them")
+    func mealPlanHasGapsWorthShowing() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+        let week = snapshot.mealPlan.week(containing: clock.today)
+
+        #expect(!week.isEmpty)
+        #expect(!week.isComplete)
+        // A week with every dinner filled shows a family who have already
+        // solved the problem the screen exists for.
+        #expect(week.days.contains { $0.dinner == nil })
+        #expect(week.days.contains { $0.dinner != nil })
+    }
+
+    @Test("There is something for dinner tonight")
+    func tonightHasAMeal() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+        let tonight = snapshot.mealPlan.meal(on: clock.today, slot: .dinner)
+
+        #expect(tonight?.title.value == "Chicken traybake")
+        #expect(tonight?.hasCook == true)
+    }
+
+    @Test("Some of the week's shopping is already done and some is not")
+    func mealPlanLeavesShoppingToDo() throws {
+        // The 'add what's missing' action needs something real to do. If every
+        // ingredient were already listed it would do nothing, and if none were
+        // it would never demonstrate the deduplication.
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+        let week = snapshot.mealPlan.week(containing: clock.today)
+        let outstanding = snapshot.mealPlan.ingredientsToBuy(
+            from: week.start,
+            to: week.end,
+            excluding: snapshot.shoppingItems
+        )
+        let everything = snapshot.mealPlan.ingredientsToBuy(from: week.start, to: week.end)
+
+        #expect(!outstanding.isEmpty)
+        #expect(outstanding.count < everything.count)
+    }
+
+    @Test("Nobody is doing all the cooking, and nobody unreasonable is doing any")
+    func cookingIsShared() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+        let week = snapshot.mealPlan.week(containing: clock.today)
+        let balance = snapshot.mealPlan.cookBalance(
+            among: snapshot.activeMembers, from: week.start, to: week.end
+        )
+        let cooks = Set(
+            snapshot.mealPlan.meals.compactMap(\.cookID)
+        )
+
+        #expect(cooks.count >= 3)
+        #expect(balance.unassignedMeals > 0)
+        // Sam is nine. A demo that shows a nine year old rostered to cook the
+        // family dinner is making a recommendation it should not make.
+        let sam = try #require(snapshot.activeMembers.first { $0.name.value == "Sam" })
+        #expect(!cooks.contains(sam.id))
+    }
 }

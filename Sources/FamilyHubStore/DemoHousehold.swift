@@ -279,6 +279,46 @@ public enum DemoHousehold {
                 )
             }
 
+        // MARK: Meals
+
+        // A week that is mostly planned and deliberately not finished. Every
+        // dinner filled would show a family who have already solved the problem
+        // the screen exists for; the two gaps are what the week view has to be
+        // able to point at.
+        //
+        // The ingredients matter as much as the meals. Some are already on the
+        // grocery list above and some are not, so the "add what's missing"
+        // action has something real to do rather than adding everything or
+        // nothing.
+        let plan: [(Int, PlannedMeal.Slot, String, Member?, [String])] = [
+            (0, .dinner, "Chicken traybake", mary, ["Chicken thighs", "New potatoes"]),
+            (1, .dinner, "Spaghetti bolognese", jerald, ["Mince", "Passata", "Spaghetti"]),
+            (2, .dinner, "Leftovers", nil, []),
+            (3, .dinner, "Fish and chips out", nil, []),
+            (5, .dinner, "Alex cooks: fajitas", alex, ["Tortillas", "Peppers", "Mince"]),
+            (6, .lunch, "Soup and sourdough", mary, ["Sourdough"]),
+            (6, .dinner, "Sunday roast", jerald, ["Chicken", "Carrots", "Parsnips"]),
+        ]
+        let plannedMeals = try plan.map { entry in
+            let (dayOffset, slot, title, cook, ingredients) = entry
+            let day = calendar.date(byAdding: .day, value: dayOffset, to: today) ?? today
+            return try PlannedMeal(
+                householdID: household.id,
+                day: day,
+                slot: slot,
+                // Sam is nine, and a nine year old cooking unsupervised is not
+                // the example this app wants to set in its own screenshots.
+                title: title,
+                notes: dayOffset == 5 ? "Alex is cooking — mild for Sam" : nil,
+                cookID: cook?.id,
+                ingredients: ingredients,
+                servings: 4,
+                plannedBy: mary.id,
+                createdAt: calendar.date(byAdding: .day, value: -2, to: today) ?? today,
+                calendar: calendar
+            )
+        }
+
         return HouseholdSnapshot(
             household: household,
             members: members,
@@ -287,7 +327,8 @@ public enum DemoHousehold {
             ledgerEntries: ledgerEntries,
             rewards: rewards,
             shoppingLists: [groceries, hardware],
-            shoppingItems: shoppingItems
+            shoppingItems: shoppingItems,
+            plannedMeals: plannedMeals
         )
     }
 
