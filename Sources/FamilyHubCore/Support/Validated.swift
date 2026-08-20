@@ -75,6 +75,14 @@ public enum Limits {
     /// Longest permitted meal title.
     public static let mealTitleLength = 80
 
+    /// Longest permitted calendar event title.
+    public static let eventTitleLength = 80
+
+    /// Longest permitted event location. Longer than a title because an
+    /// address is a legitimate thing to paste in here and truncating one to
+    /// eighty characters loses the postcode, which is the part that matters.
+    public static let eventLocationLength = 140
+
     /// Longest permitted free-text notes field.
     public static let notesLength = 500
 
@@ -95,6 +103,16 @@ public enum Limits {
 
     /// Quantity of a single shopping list item.
     public static let itemQuantity: ClosedRange<Int> = 1...999
+
+    /// How long a single calendar event may run, in minutes. Twenty-four hours
+    /// exactly, so a party can spill past midnight and a fortnight in Spain
+    /// has to be an all-day event — which is what it is.
+    public static let eventDuration: ClosedRange<Int> = 1...(24 * 60)
+
+    /// How far ahead of an event the household may ask to be told, in minutes.
+    /// A week, which covers "the passports need renewing" without letting a
+    /// reminder be scheduled beyond the horizon the planner actually plans.
+    public static let eventReminderLead: ClosedRange<Int> = 0...(7 * 24 * 60)
 
     /// Members allowed in a household on the free tier.
     public static let freeTierMembers = 3
