@@ -765,7 +765,261 @@ public struct HouseholdCommands: Sendable {
         return bought.count
     }
 
+    // MARK: - Meals
+
+    /// Plans a meal, replacing whatever the household had decided for that slot.
+    ///
+    /// Planning is an upsert on the day-and-slot pair rather than an insert.
+    /// Deciding on Thursday's dinner twice is a household changing its mind,
+    /// not a household eating twice, and a command that appended would leave
+    /// the week grid holding two answers with no way to tell which one the
+    /// family meant. The replacement keeps the original record's identifier and
+    /// the moment it was first planned, so the slot stays one row and the
+    /// conflict resolution the domain applies to a genuine offline collision
+    /// still has a stable ordering to work with.
+    ///
+    /// - Throws: ``DomainError/requiresUpgrade(feature:tier:)`` on a plan
+    ///   without meal planning, ``DomainError/notPermitted(action:role:)`` when
+    ///   the actor may not change the plan, or
+    ///   ``DomainError/memberNotInHousehold(_:)`` when the named cook has left.
+    @discardableResult
+    public func planMeal(
+        in householdID: Identifier<Household>,
+        on day: Date,
+        slot: PlannedMeal.Slot,
+        title: String,
+        notes: String? = nil,
+        cookID: Identifier<Member>? = nil,
+        ingredients: [String] = [],
+        servings: Int? = nil,
+        by actorID: Identifier<Member>
+    ) async throws -> PlannedMeal {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireActiveMember(actorID)
+        try requireMealPlanning(in: snapshot)
+        try Permissions.check(.manageMealPlan, for: actor.role)
+        if let cookID {
+            _ = try snapshot.requireActiveMember(cookID)
+        }
+
+        let calendar = snapshot.household.calendar()
+        let existing = snapshot.mealPlan.meal(on: day, slot: slot)
+        let meal = try PlannedMeal(
+            id: existing?.id ?? Identifier(),
+            householdID: householdID,
+            day: day,
+            slot: slot,
+            title: title,
+            notes: notes,
+            cookID: cookID,
+            ingredients: ingredients,
+            servings: servings,
+            plannedBy: existing?.plannedBy ?? actorID,
+            createdAt: existing?.createdAt ?? dateProvider.now,
+            calendar: calendar
+        )
+        try await store.save(meal)
+        return meal
+    }
+
+    /// Names who is cooking, or takes the name off again.
+    ///
+    /// - Throws: ``DomainError/notPermitted(action:role:)``,
+    ///   ``DomainError/memberNotInHousehold(_:)``, or
+    ///   ``DomainError/notFound(entity:id:)``.
+    @discardableResult
+    public func setMealCook(
+        _ mealID: Identifier<PlannedMeal>,
+        to cookID: Identifier<Member>?,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> PlannedMeal {
+        try await updatingMeal(mealID, in: householdID, by: actorID) { meal, snapshot in
+            if let cookID {
+                _ = try snapshot.requireActiveMember(cookID)
+            }
+            return meal.cookedBy(cookID)
+        }
+    }
+
+    /// Changes what is planned for a slot without moving it.
+    @discardableResult
+    public func updateMeal(
+        _ mealID: Identifier<PlannedMeal>,
+        in householdID: Identifier<Household>,
+        title: String? = nil,
+        notes: String?? = nil,
+        ingredients: [String]? = nil,
+        servings: Int?? = nil,
+        by actorID: Identifier<Member>
+    ) async throws -> PlannedMeal {
+        try await updatingMeal(mealID, in: householdID, by: actorID) { meal, _ in
+            var updated = meal
+            if let title {
+                updated = try updated.retitled(to: title)
+            }
+            if let notes {
+                updated = try updated.withNotes(notes)
+            }
+            if let ingredients {
+                updated = try updated.withIngredients(ingredients)
+            }
+            if let servings {
+                updated = try updated.serving(servings)
+            }
+            return updated
+        }
+    }
+
+    /// Moves a meal to another day or slot, swapping with whatever was there.
+    ///
+    /// Swapping rather than refusing or overwriting. Dragging Thursday's dinner
+    /// onto Friday when Friday has one too is a household reordering its week,
+    /// and both of the alternatives lose something the family typed: a refusal
+    /// makes them delete one first, and an overwrite silently discards it.
+    ///
+    /// - Returns: The meal in its new slot.
+    @discardableResult
+    public func moveMeal(
+        _ mealID: Identifier<PlannedMeal>,
+        to day: Date,
+        slot: PlannedMeal.Slot,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> PlannedMeal {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireActiveMember(actorID)
+        try requireMealPlanning(in: snapshot)
+        try Permissions.check(.manageMealPlan, for: actor.role)
+
+        guard let meal = snapshot.plannedMeals.first(where: { $0.id == mealID }) else {
+            throw DomainError.notFound(entity: "Meal", id: mealID.description)
+        }
+        let calendar = snapshot.household.calendar()
+        let displaced = snapshot.mealPlan.meal(on: day, slot: slot)
+
+        let moved = meal.moved(to: day, slot: slot, calendar: calendar)
+        // The displaced meal goes back to where this one came from, and is
+        // written first so the destination slot is never briefly held by two
+        // records for a subscriber reloading in between.
+        if let displaced, displaced.id != meal.id {
+            try await store.save(
+                displaced.moved(to: meal.day, slot: meal.slot, calendar: calendar)
+            )
+        }
+        try await store.save(moved)
+        return moved
+    }
+
+    /// Takes a meal off the plan.
+    public func unplanMeal(
+        _ mealID: Identifier<PlannedMeal>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireActiveMember(actorID)
+        try Permissions.check(.manageMealPlan, for: actor.role)
+        guard snapshot.plannedMeals.contains(where: { $0.id == mealID }) else {
+            throw DomainError.notFound(entity: "Meal", id: mealID.description)
+        }
+        try await store.deletePlannedMeal(mealID)
+    }
+
+    /// Adds everything the plan calls for over a period to a shopping list.
+    ///
+    /// The reason the ingredients are on the meal at all. A week planned on
+    /// Sunday becomes a shopping list on Sunday, in one tap rather than by
+    /// re-reading seven recipes — and a family that has to do the second thing
+    /// does it once and then stops planning.
+    ///
+    /// Ingredients already waiting on a list are skipped rather than merged
+    /// upward, because the count of meals wanting an ingredient is a guess at a
+    /// quantity and not a measurement: quietly turning "milk" into "milk ×3"
+    /// because three meals mention it is worse than leaving the one somebody
+    /// already added alone.
+    ///
+    /// - Returns: The items added, in the order the plan first mentions them.
+    @discardableResult
+    public func addMealIngredients(
+        from start: Date,
+        to end: Date,
+        in householdID: Identifier<Household>,
+        toList listID: Identifier<ShoppingList>,
+        by actorID: Identifier<Member>
+    ) async throws -> [ShoppingItem] {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireActiveMember(actorID)
+        try requireMealPlanning(in: snapshot)
+        try Permissions.check(.manageShoppingList, for: actor.role)
+
+        guard snapshot.shoppingLists.contains(where: { $0.id == listID }) else {
+            throw DomainError.notFound(entity: "List", id: listID.description)
+        }
+
+        // Measured against every list in the household rather than the target
+        // one. Somebody who put the mince on the hardware list by mistake has
+        // still put the mince on a list, and a second copy on another one is
+        // the failure this is meant to avoid.
+        let wanted = snapshot.mealPlan.ingredientsToBuy(
+            from: start,
+            to: end,
+            excluding: snapshot.shoppingItems
+        )
+
+        var added: [ShoppingItem] = []
+        for ingredient in wanted {
+            let item = try ShoppingItem(
+                listID: listID,
+                householdID: householdID,
+                name: ingredient.name,
+                addedBy: actorID,
+                addedAt: dateProvider.now
+            )
+            try await store.save(item)
+            added.append(item)
+        }
+        return added
+    }
+
     // MARK: - Shared plumbing
+
+    /// Refuses an operation the household's plan does not include.
+    ///
+    /// - Throws: ``DomainError/requiresUpgrade(feature:tier:)``, carrying the
+    ///   tier so the paywall can say what is being asked for rather than
+    ///   showing a generic upgrade screen.
+    private func requireMealPlanning(in snapshot: HouseholdSnapshot) throws {
+        guard snapshot.household.tier.includesMealPlanning else {
+            throw DomainError.requiresUpgrade(
+                feature: .mealPlanning, tier: snapshot.household.tier
+            )
+        }
+    }
+
+    /// Loads a meal, applies a transform, and saves the result.
+    ///
+    /// The meal-editing commands differ only in the transform, and sharing the
+    /// load-check-save keeps the tier gate and the permission check from being
+    /// present on three of them and missing from the fourth.
+    private func updatingMeal(
+        _ mealID: Identifier<PlannedMeal>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>,
+        _ transform: (PlannedMeal, HouseholdSnapshot) throws -> PlannedMeal
+    ) async throws -> PlannedMeal {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireActiveMember(actorID)
+        try requireMealPlanning(in: snapshot)
+        try Permissions.check(.manageMealPlan, for: actor.role)
+
+        guard let meal = snapshot.plannedMeals.first(where: { $0.id == mealID }) else {
+            throw DomainError.notFound(entity: "Meal", id: mealID.description)
+        }
+        let updated = try transform(meal, snapshot)
+        try await store.save(updated)
+        return updated
+    }
 
     /// Loads a chore, applies a transform, and saves the result.
     ///
