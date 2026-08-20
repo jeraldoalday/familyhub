@@ -31,6 +31,46 @@ struct HotPathTests {
         let members: [Member]
     }
 
+    /// Two years of planned meals, three a day, every one of them with a cook
+    /// and a short shopping list.
+    ///
+    /// A household that has used the meal planner since it launched, which is
+    /// the only history that tells you whether reading one week out of it is a
+    /// lookup or a walk.
+    private func withMealPlan(
+        _ busy: BusyHousehold, historyDays: Int = 730
+    ) throws
+        -> BusyHousehold
+    {
+        var snapshot = busy.snapshot
+        let members = busy.members
+        var meals: [PlannedMeal] = []
+
+        for offset in stride(from: -historyDays, through: 7, by: 1) {
+            guard
+                let day = calendar.date(byAdding: .day, value: offset, to: busy.today)
+            else { continue }
+            for (index, slot) in PlannedMeal.Slot.planned.enumerated() {
+                meals.append(
+                    try PlannedMeal(
+                        householdID: snapshot.household.id,
+                        day: day,
+                        slot: slot,
+                        title: "Meal \(offset)-\(slot.rawValue)",
+                        cookID: members[(offset + index + historyDays) % members.count].id,
+                        ingredients: ["Mince", "Rice", "Peppers"],
+                        plannedBy: members[0].id,
+                        createdAt: day,
+                        calendar: calendar
+                    )
+                )
+            }
+        }
+
+        snapshot.plannedMeals = meals
+        return BusyHousehold(snapshot: snapshot, today: busy.today, members: members)
+    }
+
     private func makeBusyHousehold(
         choreCount: Int = 20,
         historyDays: Int = 730
@@ -180,5 +220,80 @@ struct HotPathTests {
             #expect(entry.assignee?.id == entry.chore.assignee(forOccurrenceIndex: index))
         }
         #expect(agenda.count == 3)
+    }
+
+    // MARK: The meal plan
+
+    @Test("A week of the meal plan stays fast on two years of meals")
+    func mealWeekIsFastOnALargePlan() throws {
+        // Answering a day by filtering the whole plan makes rendering a week
+        // seven passes over two thousand meals, and the week view is the screen
+        // the whole feature opens on.
+        let busy = try withMealPlan(try makeBusyHousehold(choreCount: 1, historyDays: 30))
+        var planned = 0
+
+        let elapsed = duration {
+            planned = busy.snapshot.mealPlan.week(containing: busy.today).plannedCount
+        }
+
+        #expect(planned == 7 * PlannedMeal.Slot.planned.count)
+        #expect(elapsed < 1.0)
+    }
+
+    @Test("Turning a week into a shopping list stays fast on two years of meals")
+    func mealShoppingIsFastOnALargePlan() throws {
+        let busy = try withMealPlan(try makeBusyHousehold(choreCount: 1, historyDays: 30))
+        let week = busy.snapshot.mealPlan.week(containing: busy.today)
+        var wanted = 0
+
+        let elapsed = duration {
+            wanted =
+                busy.snapshot.mealPlan
+                .ingredientsToBuy(from: week.start, to: week.end)
+                .count
+        }
+
+        // Three ingredients repeated across every meal collapse to three lines,
+        // which is the deduplication doing its job on a realistic plan.
+        #expect(wanted == 3)
+        #expect(elapsed < 1.0)
+    }
+
+    @Test("The cooking split stays fast on two years of meals")
+    func cookBalanceIsFastOnALargePlan() throws {
+        let busy = try withMealPlan(try makeBusyHousehold(choreCount: 1, historyDays: 30))
+        var shares = 0
+
+        let elapsed = duration {
+            shares =
+                busy.snapshot.mealPlan
+                .cookBalance(
+                    among: busy.members,
+                    from: busy.snapshot.mealPlan.week(containing: busy.today).start,
+                    to: busy.today
+                )
+                .shares.count
+        }
+
+        #expect(shares == busy.members.count)
+        #expect(elapsed < 1.0)
+    }
+
+    @Test("A day of the plan gives the same answer indexed as it did filtered")
+    func indexedDayMatchesTheFilter() throws {
+        // Speed is only worth having if the answer is unchanged, and reading a
+        // day from the slot index is a different route to it than filtering.
+        let busy = try withMealPlan(try makeBusyHousehold(choreCount: 1, historyDays: 30))
+        let plan = busy.snapshot.mealPlan
+
+        for offset in 0..<7 {
+            let day = try #require(
+                calendar.date(byAdding: .day, value: offset, to: busy.today)
+            )
+            #expect(
+                plan.meals(on: day).map(\.id)
+                    == plan.meals.onDay(day, calendar: calendar).map(\.id)
+            )
+        }
     }
 }

@@ -45,8 +45,18 @@ public struct MealPlan: Sendable {
     }
 
     /// Everything planned for one day, in the order it is eaten.
+    ///
+    /// Answered from the slot index rather than by filtering the whole plan.
+    /// There are four slots in a day and there is no bound at all on how many
+    /// meals a household has planned over its lifetime, so filtering makes
+    /// rendering a week cost seven passes over years of history — the same
+    /// shape of mistake the agenda made before every caller shared one walk of
+    /// each chore's schedule.
     public func meals(on day: Date) -> [PlannedMeal] {
-        meals.onDay(day, calendar: calendar)
+        let normalized = calendar.startOfDay(for: day)
+        return PlannedMeal.Slot.allCases
+            .sorted()
+            .compactMap { bySlot[PlannedMeal.SlotKey(day: normalized, slot: $0)] }
     }
 
     /// The next meal from a given moment onwards, looking at today's remaining
