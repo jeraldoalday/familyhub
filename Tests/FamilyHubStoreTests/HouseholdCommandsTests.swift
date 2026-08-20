@@ -480,6 +480,53 @@ struct HouseholdCommandsTests {
         #expect(Set(colours).count == colours.count)
     }
 
+    // MARK: Members who have left
+
+    @Test("A removed child can no longer spend their points")
+    func removedMemberCannotRedeem() async throws {
+        let f = try await makeFixture()
+        try await f.commands.adjustPoints(
+            for: f.child.id, in: f.household.id, by: f.parent.id, amount: 50
+        )
+        try await f.commands.removeMember(f.child.id, from: f.household.id, by: f.parent.id)
+
+        await #expect(throws: DomainError.memberNotInHousehold(f.child.id)) {
+            try await f.commands.redeemReward(
+                f.reward.id, in: f.household.id, by: f.child.id
+            )
+        }
+
+        // Their history is untouched, which is the reason removal is a
+        // tombstone rather than a delete.
+        let snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.ledger.balance(for: f.child.id) == 50)
+        #expect(snapshot.member(f.child.id) != nil)
+    }
+
+    @Test("A removed member cannot add to the shopping list")
+    func removedMemberCannotShop() async throws {
+        let f = try await makeFixture()
+        try await f.commands.removeMember(f.child.id, from: f.household.id, by: f.parent.id)
+
+        await #expect(throws: DomainError.memberNotInHousehold(f.child.id)) {
+            try await f.commands.addShoppingItem(
+                "Biscuits", to: f.list.id, in: f.household.id, by: f.child.id
+            )
+        }
+    }
+
+    @Test("A removed member cannot complete a chore")
+    func removedMemberCannotComplete() async throws {
+        let f = try await makeFixture()
+        try await f.commands.removeMember(f.child.id, from: f.household.id, by: f.parent.id)
+
+        await #expect(throws: DomainError.memberNotInHousehold(f.child.id)) {
+            try await f.commands.completeChore(
+                f.chore.id, on: clock.today, in: f.household.id, by: f.child.id
+            )
+        }
+    }
+
     // MARK: Shopping
 
     @Test("Adding an item already on the list merges instead of duplicating")

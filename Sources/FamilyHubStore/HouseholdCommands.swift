@@ -50,7 +50,7 @@ public struct HouseholdCommands: Sendable {
         // The first member of a brand-new household has nobody to authorise
         // them, which is the one legitimate case for an absent actor.
         if let actorID {
-            let actor = try snapshot.requireMember(actorID)
+            let actor = try snapshot.requireActiveMember(actorID)
             try Permissions.check(.inviteMember, for: actor.role)
             guard actor.role.assignableRoles.contains(role) else {
                 throw DomainError.notPermitted(action: .inviteMember, role: actor.role)
@@ -82,7 +82,7 @@ public struct HouseholdCommands: Sendable {
         by actorID: Identifier<Member>
     ) async throws {
         let snapshot = try await store.snapshot(of: householdID)
-        let actor = try snapshot.requireMember(actorID)
+        let actor = try snapshot.requireActiveMember(actorID)
         let target = try snapshot.requireMember(memberID)
 
         try Permissions.check(.removeMember, for: actor.role)
@@ -109,7 +109,7 @@ public struct HouseholdCommands: Sendable {
         by actorID: Identifier<Member>
     ) async throws -> Member {
         let snapshot = try await store.snapshot(of: householdID)
-        let actor = try snapshot.requireMember(actorID)
+        let actor = try snapshot.requireActiveMember(actorID)
         let target = try snapshot.requireMember(memberID)
 
         try Permissions.check(.removeMember, for: actor.role)
@@ -138,7 +138,7 @@ public struct HouseholdCommands: Sendable {
         by actorID: Identifier<Member>
     ) async throws -> Member {
         let snapshot = try await store.snapshot(of: householdID)
-        let actor = try snapshot.requireMember(actorID)
+        let actor = try snapshot.requireActiveMember(actorID)
         let target = try snapshot.requireMember(memberID)
 
         try Permissions.check(.inviteMember, for: actor.role)
@@ -170,7 +170,7 @@ public struct HouseholdCommands: Sendable {
         by actorID: Identifier<Member>
     ) async throws -> Chore {
         let snapshot = try await store.snapshot(of: householdID)
-        let actor = try snapshot.requireMember(actorID)
+        let actor = try snapshot.requireActiveMember(actorID)
         try Permissions.check(.createChore, for: actor.role)
         try authorize(assignment, by: actor, in: snapshot)
 
@@ -221,7 +221,7 @@ public struct HouseholdCommands: Sendable {
         recurrence: RecurrenceRule? = nil
     ) async throws -> Chore {
         let snapshot = try await store.snapshot(of: householdID)
-        let actor = try snapshot.requireMember(actorID)
+        let actor = try snapshot.requireActiveMember(actorID)
         var chore = try snapshot.requireChore(choreID)
 
         try Permissions.check(.createChore, for: actor.role)
@@ -320,7 +320,7 @@ public struct HouseholdCommands: Sendable {
         by actorID: Identifier<Member>
     ) async throws {
         let snapshot = try await store.snapshot(of: householdID)
-        let actor = try snapshot.requireMember(actorID)
+        let actor = try snapshot.requireActiveMember(actorID)
         _ = try snapshot.requireChore(choreID)
         try Permissions.check(.manageHousehold, for: actor.role)
         try await store.deleteChore(choreID)
@@ -349,7 +349,7 @@ public struct HouseholdCommands: Sendable {
     ) async throws -> ChoreCompletion {
         let snapshot = try await store.snapshot(of: householdID)
         let chore = try snapshot.requireChore(choreID)
-        let member = try snapshot.requireMember(memberID)
+        let member = try snapshot.requireActiveMember(memberID)
         let calendar = snapshot.household.calendar()
         let normalizedDay = calendar.startOfDay(for: day)
 
@@ -421,7 +421,7 @@ public struct HouseholdCommands: Sendable {
         by actorID: Identifier<Member>
     ) async throws -> ChoreCompletion {
         let snapshot = try await store.snapshot(of: householdID)
-        let actor = try snapshot.requireMember(actorID)
+        let actor = try snapshot.requireActiveMember(actorID)
         guard let completion = snapshot.completions.first(where: { $0.id == completionID }) else {
             throw DomainError.notFound(entity: "Completion", id: completionID.description)
         }
@@ -454,7 +454,7 @@ public struct HouseholdCommands: Sendable {
         reason: String? = nil
     ) async throws -> ChoreCompletion {
         let snapshot = try await store.snapshot(of: householdID)
-        let actor = try snapshot.requireMember(actorID)
+        let actor = try snapshot.requireActiveMember(actorID)
         guard let completion = snapshot.completions.first(where: { $0.id == completionID }) else {
             throw DomainError.notFound(entity: "Completion", id: completionID.description)
         }
@@ -479,7 +479,7 @@ public struct HouseholdCommands: Sendable {
         by memberID: Identifier<Member>
     ) async throws -> LedgerEntry {
         let snapshot = try await store.snapshot(of: householdID)
-        let member = try snapshot.requireMember(memberID)
+        let member = try snapshot.requireActiveMember(memberID)
         let reward = try snapshot.requireReward(rewardID)
         let calendar = snapshot.household.calendar()
 
@@ -516,7 +516,7 @@ public struct HouseholdCommands: Sendable {
         note: String? = nil
     ) async throws -> LedgerEntry {
         let snapshot = try await store.snapshot(of: householdID)
-        let actor = try snapshot.requireMember(actorID)
+        let actor = try snapshot.requireActiveMember(actorID)
         _ = try snapshot.requireMember(memberID)
 
         try Permissions.check(.adjustPoints, for: actor.role)
@@ -549,7 +549,7 @@ public struct HouseholdCommands: Sendable {
         by memberID: Identifier<Member>
     ) async throws -> ShoppingItem {
         let snapshot = try await store.snapshot(of: householdID)
-        let member = try snapshot.requireMember(memberID)
+        let member = try snapshot.requireActiveMember(memberID)
         try Permissions.check(.manageShoppingList, for: member.role)
 
         // Merging rather than appending is what the person standing in the shop
@@ -583,7 +583,7 @@ public struct HouseholdCommands: Sendable {
         by memberID: Identifier<Member>
     ) async throws -> ShoppingItem {
         let snapshot = try await store.snapshot(of: householdID)
-        let member = try snapshot.requireMember(memberID)
+        let member = try snapshot.requireActiveMember(memberID)
         try Permissions.check(.manageShoppingList, for: member.role)
 
         guard let item = snapshot.shoppingItems.first(where: { $0.id == itemID }) else {
@@ -661,7 +661,7 @@ public struct HouseholdCommands: Sendable {
         by actorID: Identifier<Member>
     ) async throws -> Reward {
         let snapshot = try await store.snapshot(of: householdID)
-        let actor = try snapshot.requireMember(actorID)
+        let actor = try snapshot.requireActiveMember(actorID)
         try Permissions.check(.createReward, for: actor.role)
 
         // Enforced here rather than only at the paywall. A tier check that
@@ -703,7 +703,7 @@ public struct HouseholdCommands: Sendable {
         by actorID: Identifier<Member>
     ) async throws -> Reward {
         let snapshot = try await store.snapshot(of: householdID)
-        let actor = try snapshot.requireMember(actorID)
+        let actor = try snapshot.requireActiveMember(actorID)
         let reward = try snapshot.requireReward(rewardID)
         try Permissions.check(.createReward, for: actor.role)
 
@@ -726,7 +726,7 @@ public struct HouseholdCommands: Sendable {
         by actorID: Identifier<Member>
     ) async throws -> ShoppingList {
         let snapshot = try await store.snapshot(of: householdID)
-        let actor = try snapshot.requireMember(actorID)
+        let actor = try snapshot.requireActiveMember(actorID)
         try Permissions.check(.manageShoppingList, for: actor.role)
 
         let list = try ShoppingList(
@@ -755,7 +755,7 @@ public struct HouseholdCommands: Sendable {
         by actorID: Identifier<Member>
     ) async throws -> Int {
         let snapshot = try await store.snapshot(of: householdID)
-        let actor = try snapshot.requireMember(actorID)
+        let actor = try snapshot.requireActiveMember(actorID)
         try Permissions.check(.manageShoppingList, for: actor.role)
 
         let bought = snapshot.items(on: listID).purchased
@@ -779,7 +779,7 @@ public struct HouseholdCommands: Sendable {
         _ transform: (Chore, Date) throws -> Chore
     ) async throws -> Chore {
         let snapshot = try await store.snapshot(of: householdID)
-        let actor = try snapshot.requireMember(actorID)
+        let actor = try snapshot.requireActiveMember(actorID)
         let chore = try snapshot.requireChore(choreID)
         try Permissions.check(.createChore, for: actor.role)
 
@@ -795,7 +795,7 @@ public struct HouseholdCommands: Sendable {
         _ transform: (Household) throws -> Household
     ) async throws -> Household {
         let snapshot = try await store.snapshot(of: householdID)
-        let actor = try snapshot.requireMember(actorID)
+        let actor = try snapshot.requireActiveMember(actorID)
         try Permissions.check(.manageHousehold, for: actor.role)
 
         let updated = try transform(snapshot.household)
@@ -815,7 +815,10 @@ public struct HouseholdCommands: Sendable {
     ) throws {
         let others = assignment.candidateMemberIDs.filter { $0 != actor.id }
         for memberID in assignment.candidateMemberIDs {
-            _ = try snapshot.requireMember(memberID)
+            // Active, not merely on file. A rota that includes somebody who has
+            // left silently hands every second turn to nobody, and the chore
+            // reads as unassigned on the days it is theirs.
+            _ = try snapshot.requireActiveMember(memberID)
         }
         guard !others.isEmpty else { return }
         try Permissions.check(.assignChore, for: actor.role)

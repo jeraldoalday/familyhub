@@ -404,6 +404,54 @@ struct ChoreCommandTests {
         #expect(back.joinedAt == f.child.joinedAt)
     }
 
+    // MARK: Members who have left
+
+    @Test("A removed adult cannot change the household from an old device")
+    func removedAdultCannotManageHousehold() async throws {
+        let f = try await makeFixture()
+        try await f.commands.removeMember(f.adult.id, from: f.household.id, by: f.owner.id)
+
+        await #expect(throws: DomainError.memberNotInHousehold(f.adult.id)) {
+            try await f.commands.setApprovalRequired(
+                false, in: f.household.id, by: f.adult.id
+            )
+        }
+        await #expect(throws: DomainError.memberNotInHousehold(f.adult.id)) {
+            try await f.commands.createChore(
+                in: f.household.id, title: "Wash the car", by: f.adult.id
+            )
+        }
+    }
+
+    @Test("A chore cannot be handed to somebody who has left")
+    func choreCannotBeAssignedToRemovedMember() async throws {
+        let f = try await makeFixture()
+        try await f.commands.removeMember(f.teen.id, from: f.household.id, by: f.owner.id)
+
+        await #expect(throws: DomainError.memberNotInHousehold(f.teen.id)) {
+            try await f.commands.createChore(
+                in: f.household.id,
+                title: "Take out the bins",
+                assignment: .rotating([f.child.id, f.teen.id]),
+                by: f.owner.id
+            )
+        }
+    }
+
+    @Test("A reinstated member gets their permissions back with their record")
+    func reinstatedMemberCanActAgain() async throws {
+        let f = try await makeFixture()
+        try await f.commands.removeMember(f.adult.id, from: f.household.id, by: f.owner.id)
+        try await f.commands.reinstateMember(
+            f.adult.id, in: f.household.id, by: f.owner.id
+        )
+
+        let chore = try await f.commands.createChore(
+            in: f.household.id, title: "Wash the car", by: f.adult.id
+        )
+        #expect(chore.createdBy == f.adult.id)
+    }
+
     // MARK: Household settings
 
     @Test("Only an owner changes household settings")

@@ -114,6 +114,28 @@ extension HouseholdSnapshot {
         return found
     }
 
+    /// Requires a member who is still in the household.
+    ///
+    /// The distinction from ``requireMember(_:)`` is the whole point of keeping
+    /// removed members on file. Their record has to survive, because a year of
+    /// completions and ledger entries names them and history that points at
+    /// nobody is worse than no history. What must not survive is their
+    /// authority: a teenager who has moved out still resolves by identifier, so
+    /// a command that only asks whether the record exists will happily let them
+    /// spend points, add chores, or change settings from a device nobody
+    /// remembered to sign out.
+    ///
+    /// - Throws: ``DomainError/notFound(entity:id:)`` when there is no such
+    ///   record at all, or ``DomainError/memberNotInHousehold(_:)`` when they
+    ///   have been removed.
+    public func requireActiveMember(_ id: Identifier<Member>) throws -> Member {
+        let found = try requireMember(id)
+        guard found.isActive else {
+            throw DomainError.memberNotInHousehold(id)
+        }
+        return found
+    }
+
     /// Requires a chore, throwing if it is gone.
     ///
     /// - Throws: ``DomainError/notFound(entity:id:)``.
