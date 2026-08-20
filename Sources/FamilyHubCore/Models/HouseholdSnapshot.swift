@@ -161,10 +161,22 @@ extension HouseholdSnapshot {
         public let completion: ChoreCompletion?
 
         /// Whether it is done, whether or not the points are approved yet.
-        public var isDone: Bool { completion != nil }
+        ///
+        /// A completion an adult sent back does not count. The row it produces
+        /// carries that record so it can say *why* it is outstanding again,
+        /// which is the difference between a chore that reappeared for no
+        /// visible reason and one that reappeared with "you missed under the
+        /// table" attached.
+        public var isDone: Bool { completion?.approval.countsAsDone ?? false }
 
         /// Whether it is waiting on an adult.
         public var needsApproval: Bool { completion?.approval.needsReview ?? false }
+
+        /// Whether an adult sent it back, so it is due again today.
+        public var wasRejected: Bool { completion?.approval.isRejected ?? false }
+
+        /// Why it was sent back, when a reason was given.
+        public var rejectionReason: String? { completion?.approval.rejectionReason }
 
         /// A stable identity across reloads: the same chore on the same day is
         /// the same row, so list animations behave.

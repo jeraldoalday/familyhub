@@ -80,9 +80,10 @@ public struct StreakCalculator: Sendable {
     ///
     /// - Parameters:
     ///   - chores: The household's chores. Archived ones are dropped.
-    ///   - completions: Every completion record. Duplicates from two devices
-    ///     recording the same occurrence collapse first, so a synced duplicate
-    ///     cannot count a day twice.
+    ///   - completions: Every completion record. Records an adult sent back
+    ///     are dropped, and duplicates from two devices recording the same
+    ///     occurrence collapse, so neither a rejected day nor a synced
+    ///     duplicate can count toward a run.
     ///   - engine: The recurrence engine for this household.
     public init(
         chores: some Collection<Chore>,
@@ -91,8 +92,15 @@ public struct StreakCalculator: Sendable {
     ) {
         self.engine = engine
         self.chores = chores.filter(\.isActive)
+        // Filtered before deduplicating, not after. Deduplication keeps the
+        // earliest record of an occurrence, so a day that was ticked off, sent
+        // back, and done again would otherwise collapse onto the rejected
+        // record and lose the run the second attempt earned.
         self.completed = Set(
-            completions.deduplicatedByOccurrence().map(\.occurrenceKey)
+            completions
+                .filter(\.approval.countsAsDone)
+                .deduplicatedByOccurrence()
+                .map(\.occurrenceKey)
         )
     }
 

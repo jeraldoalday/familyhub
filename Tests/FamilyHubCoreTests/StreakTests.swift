@@ -45,7 +45,8 @@ struct StreakTests {
     private func completion(
         of chore: Chore,
         on offset: Int,
-        by memberID: Identifier<Member>? = nil
+        by memberID: Identifier<Member>? = nil,
+        approval: ChoreCompletion.Approval = .notRequired
     ) -> ChoreCompletion {
         ChoreCompletion(
             householdID: householdID,
@@ -53,6 +54,7 @@ struct StreakTests {
             occurrenceDay: day(offset),
             completedBy: memberID ?? sam,
             completedAt: day(offset).addingTimeInterval(60 * 60 * 18),
+            approval: approval,
             pointsAwarded: 10,
             calendar: calendar
         )
@@ -372,5 +374,99 @@ struct StreakTests {
         )
 
         #expect(snapshot.streaks.streak(for: chore, asOf: day(2)).length == 3)
+    }
+
+    // MARK: Approval states
+
+    @Test("Work waiting on a parent still holds the streak up")
+    func pendingCompletionsCount() throws {
+        let chore = try makeChore()
+        let done = [
+            completion(of: chore, on: 0),
+            completion(of: chore, on: 1, approval: .pending),
+            completion(of: chore, on: 2, approval: .pending),
+        ]
+
+        let streak = calculator(chores: [chore], completions: done)
+            .streak(for: chore, asOf: day(2))
+
+        // A child who did the work should not watch their run break because
+        // nobody has opened the app to approve it yet.
+        #expect(streak.length == 3)
+    }
+
+    @Test("A completion sent back breaks the streak")
+    func rejectedCompletionBreaksStreak() throws {
+        let chore = try makeChore()
+        let done = [
+            completion(of: chore, on: 0),
+            completion(of: chore, on: 1),
+            completion(
+                of: chore,
+                on: 2,
+                approval: .rejected(by: parent, at: day(2), reason: "Not actually done")
+            ),
+        ]
+
+        // Measured the next day, so day 2 has settled. Measured on day 2 it
+        // would still be in play — a chore sent back this morning can be
+        // redone this evening, and the run is not lost until midnight.
+        let streak = calculator(chores: [chore], completions: done)
+            .streak(for: chore, asOf: day(3))
+
+        #expect(streak.length == 0)
+        #expect(!streak.isLive)
+    }
+
+    @Test("Redoing a rejected day restores the run")
+    func redoneDayCountsAgain() throws {
+        let chore = try makeChore()
+        let rejected = completion(
+            of: chore,
+            on: 2,
+            approval: .rejected(by: parent, at: day(2), reason: nil)
+        )
+        // The redo is recorded later than the rejection, which is exactly the
+        // case deduplication would collapse the wrong way if it ran first.
+        let redone = ChoreCompletion(
+            householdID: householdID,
+            choreID: chore.id,
+            occurrenceDay: day(2),
+            completedBy: sam,
+            completedAt: day(2).addingTimeInterval(60 * 60 * 20),
+            approval: .approved(by: parent, at: day(2)),
+            pointsAwarded: 10,
+            calendar: calendar
+        )
+        let done = [
+            completion(of: chore, on: 0),
+            completion(of: chore, on: 1),
+            rejected,
+            redone,
+        ]
+
+        let streak = calculator(chores: [chore], completions: done)
+            .streak(for: chore, asOf: day(2))
+
+        #expect(streak.length == 3)
+        #expect(streak.lastDay == day(2))
+    }
+
+    @Test("A rejected day does not complete a member's day")
+    func rejectedCompletionBreaksMemberStreak() throws {
+        let chore = try makeChore(assignment: .member(sam))
+        let done = [
+            completion(of: chore, on: 0),
+            completion(
+                of: chore,
+                on: 1,
+                approval: .rejected(by: parent, at: day(1), reason: nil)
+            ),
+        ]
+
+        let streak = calculator(chores: [chore], completions: done)
+            .streak(forMember: sam, asOf: day(2))
+
+        #expect(streak.length == 0)
     }
 }

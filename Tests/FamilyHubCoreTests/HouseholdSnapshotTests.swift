@@ -227,4 +227,79 @@ struct HouseholdSnapshotTests {
         ]
         #expect(f.snapshot.reviewQueue.count == 1)
     }
+
+    // MARK: Rejected work
+
+    @Test("A rejected completion puts the chore back on the agenda")
+    func rejectedCompletionIsOutstandingAgain() throws {
+        var f = try makeFixture()
+        let bins = try chore("Bins", in: f)
+        f.snapshot.chores = [bins]
+        f.snapshot.completions = [
+            ChoreCompletion(
+                householdID: f.snapshot.household.id, choreID: bins.id,
+                occurrenceDay: date(2026, 3, 2), completedBy: f.alex.id,
+                completedAt: date(2026, 3, 2),
+                approval: .rejected(
+                    by: f.parent.id, at: date(2026, 3, 2, hour: 18),
+                    reason: "You missed under the table"
+                ),
+                pointsAwarded: 10, calendar: calendar
+            )
+        ]
+
+        let row = try #require(f.snapshot.agenda(for: date(2026, 3, 2)).first)
+        #expect(!row.isDone)
+        #expect(row.wasRejected)
+        #expect(row.rejectionReason == "You missed under the table")
+        // The record stays attached: the row has to be able to say why it came
+        // back, and it is also what the redo replaces.
+        #expect(row.completion != nil)
+    }
+
+    @Test("Work waiting on a parent still counts as done")
+    func pendingCompletionCountsAsDone() throws {
+        var f = try makeFixture()
+        let bins = try chore("Bins", in: f)
+        f.snapshot.chores = [bins]
+        f.snapshot.completions = [
+            ChoreCompletion(
+                householdID: f.snapshot.household.id, choreID: bins.id,
+                occurrenceDay: date(2026, 3, 2), completedBy: f.alex.id,
+                completedAt: date(2026, 3, 2), approval: .pending,
+                pointsAwarded: 10, calendar: calendar
+            )
+        ]
+
+        let row = try #require(f.snapshot.agenda(for: date(2026, 3, 2)).first)
+        #expect(row.isDone)
+        #expect(row.needsApproval)
+        #expect(!row.wasRejected)
+    }
+
+    @Test("A rejected chore sorts above the finished ones")
+    func rejectedChoreSortsWithOutstandingWork() throws {
+        var f = try makeFixture()
+        let bins = try chore("Bins", in: f)
+        let dishes = try chore("Dishes", in: f)
+        f.snapshot.chores = [bins, dishes]
+        f.snapshot.completions = [
+            ChoreCompletion(
+                householdID: f.snapshot.household.id, choreID: dishes.id,
+                occurrenceDay: date(2026, 3, 2), completedBy: f.alex.id,
+                completedAt: date(2026, 3, 2), approval: .notRequired,
+                pointsAwarded: 10, calendar: calendar
+            ),
+            ChoreCompletion(
+                householdID: f.snapshot.household.id, choreID: bins.id,
+                occurrenceDay: date(2026, 3, 2), completedBy: f.alex.id,
+                completedAt: date(2026, 3, 2),
+                approval: .rejected(by: f.parent.id, at: date(2026, 3, 2), reason: nil),
+                pointsAwarded: 10, calendar: calendar
+            ),
+        ]
+
+        let rows = f.snapshot.agenda(for: date(2026, 3, 2))
+        #expect(rows.map(\.chore.title.value) == ["Bins", "Dishes"])
+    }
 }

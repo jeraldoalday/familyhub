@@ -91,6 +91,33 @@ extension ChoreCompletion {
 
         /// Whether an adult still needs to act.
         public var needsReview: Bool { self == .pending }
+
+        /// Whether the occurrence should still be treated as finished.
+        ///
+        /// Wider than ``countsTowardBalance`` by exactly one case, and the
+        /// difference is deliberate. Work waiting on a parent is done — the
+        /// child has swept the floor, and a home screen that shows the chore as
+        /// outstanding until an adult opens the app is telling them it did not
+        /// count. Work that was *sent back* is not done, because the whole
+        /// meaning of rejecting a completion is that it has to happen again.
+        public var countsAsDone: Bool {
+            switch self {
+            case .notRequired, .pending, .approved: true
+            case .rejected: false
+            }
+        }
+
+        /// Whether an adult sent this back for another go.
+        public var isRejected: Bool {
+            if case .rejected = self { return true }
+            return false
+        }
+
+        /// Why it was sent back, when a reason was given.
+        public var rejectionReason: String? {
+            if case .rejected(_, _, let reason) = self { return reason }
+            return nil
+        }
     }
 }
 
@@ -169,6 +196,12 @@ extension Collection where Element == ChoreCompletion {
     /// clears in the order children submitted.
     public var awaitingReview: [ChoreCompletion] {
         filter(\.approval.needsReview).sorted { $0.completedAt < $1.completedAt }
+    }
+
+    /// The completions an adult sent back, which are outstanding work again
+    /// rather than history.
+    public var rejected: [ChoreCompletion] {
+        filter(\.approval.isRejected)
     }
 
     /// The completions recorded by a given member.
