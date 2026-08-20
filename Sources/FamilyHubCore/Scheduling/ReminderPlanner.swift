@@ -30,18 +30,26 @@ public struct Reminder: Sendable, Hashable, Identifiable {
         /// The coming week still has dinners nobody has decided on.
         case mealPlanGaps(count: Int)
 
+        /// Something on the calendar is about to start.
+        case eventSoon(eventID: Identifier<CalendarEvent>)
+
         /// How disruptive this kind is allowed to be, lowest first.
         ///
         /// Used to decide what survives the per-person daily cap. The ladder is
         /// ordered by how badly the day goes if the reminder is missed rather
-        /// than by how interesting it is. A streak about to break is
-        /// time-critical and cannot be acted on tomorrow, so it outranks
-        /// everything; being down to cook is next, because a cook who finds out
-        /// at seven is a household ordering takeaway; and a week with holes in
-        /// it can be planned any evening, so it sits below a birthday and above
-        /// a list of chores that is also visible on the home screen.
+        /// than by how interesting it is. An appointment outranks everything,
+        /// because it is the only thing here whose deadline was set by somebody
+        /// outside the household — a missed dentist appointment costs money and
+        /// cannot be made up this evening, which is true of nothing else on the
+        /// list. A streak about to break comes next: time-critical, but the
+        /// household set the stakes itself. Being down to cook follows, because
+        /// a cook who finds out at seven is a household ordering takeaway; and a
+        /// week with holes in it can be planned any evening, so it sits below a
+        /// birthday and above a list of chores that is also visible on the home
+        /// screen.
         public var priority: Int {
             switch self {
+            case .eventSoon: 6
             case .streakAtRisk: 5
             case .cookingTonight: 4
             case .approvalsWaiting: 3
@@ -130,6 +138,14 @@ public struct ReminderSchedule: Hashable, Sendable, Codable {
     /// Whether anything about the meal plan is sent at all.
     public var sendsMealReminders: Bool
 
+    /// Whether calendar events are allowed to interrupt anybody.
+    ///
+    /// Only events that asked to are sent regardless — an event's reminder
+    /// lead is `nil` unless somebody set one — so this switch is for the
+    /// household that wants the calendar to be a thing they look at rather
+    /// than a thing that speaks.
+    public var sendsEventReminders: Bool
+
     /// Creates a schedule.
     public init(
         morningHour: Int = 8,
@@ -138,7 +154,8 @@ public struct ReminderSchedule: Hashable, Sendable, Codable {
         sendsMorningDigest: Bool = true,
         sendsStreakNudges: Bool = true,
         cookingHour: Int = 16,
-        sendsMealReminders: Bool = true
+        sendsMealReminders: Bool = true,
+        sendsEventReminders: Bool = true
     ) {
         self.morningHour = min(23, max(0, morningHour))
         self.eveningHour = min(23, max(0, eveningHour))
@@ -147,6 +164,7 @@ public struct ReminderSchedule: Hashable, Sendable, Codable {
         self.sendsStreakNudges = sendsStreakNudges
         self.cookingHour = min(23, max(0, cookingHour))
         self.sendsMealReminders = sendsMealReminders
+        self.sendsEventReminders = sendsEventReminders
     }
 
     /// Decodes a schedule saved by an older build.
@@ -177,7 +195,10 @@ public struct ReminderSchedule: Hashable, Sendable, Codable {
                 ?? standard.cookingHour,
             sendsMealReminders: try container.decodeIfPresent(
                 Bool.self, forKey: .sendsMealReminders
-            ) ?? standard.sendsMealReminders
+            ) ?? standard.sendsMealReminders,
+            sendsEventReminders: try container.decodeIfPresent(
+                Bool.self, forKey: .sendsEventReminders
+            ) ?? standard.sendsEventReminders
         )
     }
 
@@ -221,6 +242,7 @@ public struct ReminderPlanner: Sendable {
         var planned: [Reminder] = []
         planned.append(contentsOf: morningReminders(on: today, calendar: calendar))
         planned.append(contentsOf: mealReminders(on: today, calendar: calendar))
+        planned.append(contentsOf: eventReminders(on: today, calendar: calendar))
         planned.append(
             contentsOf: eveningReminders(on: today, calendar: calendar, streaks: streaks)
         )
@@ -429,6 +451,89 @@ public struct ReminderPlanner: Sendable {
             }
     }
 
+    // MARK: - The calendar
+
+    /// How far ahead an event's reminder may be asked to fire, in days.
+    ///
+    /// The bound ``Limits/eventReminderLead`` already enforces, restated in
+    /// days because that is the unit the scan below has to look ahead in.
+    private static var maximumLeadDays: Int {
+        Limits.eventReminderLead.upperBound / (24 * 60)
+    }
+
+    /// Reminders for the things on the calendar that asked to be reminded
+    /// about.
+    ///
+    /// Only events carrying a lead are considered. A calendar that notifies
+    /// for everything on it is a calendar nobody puts anything on, so the
+    /// default is silence and the family opts each entry in.
+    ///
+    /// The scan looks a week past the day being planned and then keeps only
+    /// the reminders whose fire time lands on it. That is the awkward-looking
+    /// half of this, and it is deliberate: a reminder is planned on the day it
+    /// *fires* rather than the day the event happens, which is what makes a
+    /// seven-day lead work against a three-day planning horizon and what makes
+    /// the per-person cap count each reminder against the day it will actually
+    /// interrupt somebody.
+    private func eventReminders(on day: Date, calendar: Calendar) -> [Reminder] {
+        guard schedule.sendsEventReminders else { return [] }
+
+        let horizon =
+            calendar.date(byAdding: .day, value: Self.maximumLeadDays, to: day) ?? day
+        let familyCalendar = snapshot.familyCalendar
+        let members = snapshot.activeMembers
+
+        return familyCalendar.occurrences(from: day, to: horizon)
+            .flatMap { occurrence -> [Reminder] in
+                guard let lead = occurrence.event.reminderMinutesBefore,
+                    let fireDate = fireDate(for: occurrence, lead: lead, calendar: calendar),
+                    calendar.isDate(fireDate, inSameDayAs: day)
+                else { return [] }
+
+                return occurrence.event.participants
+                    .resolved(against: members)
+                    .map { recipient in
+                        Reminder(
+                            id: identity(
+                                recipient.id,
+                                occurrence.day,
+                                "event-\(occurrence.event.id)",
+                                calendar: calendar
+                            ),
+                            recipientID: recipient.id,
+                            fireDate: fireDate,
+                            title: occurrence.event.title.value,
+                            body: Self.eventBody(
+                                when: occurrence.event.timeSummary(
+                                    on: occurrence.day, calendar: calendar
+                                ),
+                                location: occurrence.event.location?.value
+                            ),
+                            kind: .eventSoon(eventID: occurrence.event.id)
+                        )
+                    }
+            }
+    }
+
+    /// When to speak up about an occurrence.
+    ///
+    /// A timed event counts back from the minute it starts. An all-day one
+    /// counts back from the morning digest hour rather than from midnight,
+    /// because a lead of zero on a half term means "tell me this morning" and
+    /// not "wake the household at twelve".
+    private func fireDate(
+        for occurrence: FamilyCalendar.Occurrence,
+        lead: Int,
+        calendar: Calendar
+    ) -> Date? {
+        let anchor =
+            occurrence.isAllDay
+            ? time(schedule.morningHour, on: occurrence.day, calendar: calendar)
+            : occurrence.start
+        guard let anchor else { return nil }
+        return calendar.date(byAdding: .minute, value: -lead, to: anchor)
+    }
+
     // MARK: - Evening
 
     /// The evening nudge: one per person, naming the streak with most at stake.
@@ -565,6 +670,14 @@ extension ReminderPlanner {
         count == 1
             ? "1 dinner next week still needs deciding."
             : "\(count) dinners next week still need deciding."
+    }
+
+    /// Says when, and where when there is a where. A notification that names
+    /// an appointment without saying what time it is sends the person to the
+    /// app to find out, which is the work the notification was meant to save.
+    static func eventBody(when: String, location: String?) -> String {
+        guard let location, !location.isEmpty else { return when }
+        return "\(when) · \(location)"
     }
 
     /// Names the chore and the number, because that is the whole reason this

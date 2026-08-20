@@ -576,4 +576,200 @@ struct ReminderPlannerTests {
         #expect(decoded.cookingHour == ReminderSchedule.standard.cookingHour)
         #expect(decoded.sendsMealReminders)
     }
+
+    // MARK: Calendar events
+
+    /// An event on the family calendar, defaulting to one that asks to be
+    /// reminded about half an hour ahead.
+    private func event(
+        _ fixture: Fixture,
+        title: String = "Dentist",
+        dayOffset: Int = 0,
+        timing: CalendarEvent.Timing = .at(hour: 15, lasting: 30),
+        location: String? = nil,
+        recurrence: RecurrenceRule = .once,
+        participants: CalendarEvent.Participants? = nil,
+        reminderMinutesBefore: Int? = 30
+    ) throws -> CalendarEvent {
+        try CalendarEvent(
+            householdID: fixture.snapshot.household.id,
+            title: title,
+            location: location,
+            startDate: day(dayOffset),
+            timing: timing,
+            recurrence: recurrence,
+            participants: participants ?? .members([fixture.sam.id]),
+            reminderMinutesBefore: reminderMinutesBefore,
+            createdBy: fixture.parent.id,
+            createdAt: clock.now,
+            calendar: calendar
+        )
+    }
+
+    @Test("An event that asked to be reminded about fires ahead of its start")
+    func eventFiresAheadOfItsStart() throws {
+        var fixture = try makeFixture()
+        fixture.snapshot.events = [try event(fixture)]
+
+        let planned = ReminderPlanner(snapshot: fixture.snapshot)
+            .reminders(for: clock.today, now: clock.now)
+            .filter { if case .eventSoon = $0.kind { return true } else { return false } }
+
+        #expect(planned.count == 1)
+        let reminder = try #require(planned.first)
+        #expect(reminder.recipientID == fixture.sam.id)
+        #expect(reminder.title == "Dentist")
+        #expect(hour(of: reminder.fireDate) == 14)
+        #expect(calendar.component(.minute, from: reminder.fireDate) == 30)
+    }
+
+    @Test("An event with no lead set says nothing")
+    func silentEventsSayNothing() throws {
+        var fixture = try makeFixture()
+        fixture.snapshot.events = [try event(fixture, reminderMinutesBefore: nil)]
+
+        let planned = ReminderPlanner(snapshot: fixture.snapshot)
+            .reminders(for: clock.today, now: clock.now)
+        #expect(!planned.contains { if case .eventSoon = $0.kind { true } else { false } })
+    }
+
+    @Test("A household that has switched calendar reminders off gets none")
+    func eventRemindersCanBeSwitchedOff() throws {
+        var fixture = try makeFixture()
+        fixture.snapshot.events = [try event(fixture)]
+
+        let planned = ReminderPlanner(
+            snapshot: fixture.snapshot,
+            schedule: ReminderSchedule(sendsEventReminders: false)
+        ).reminders(for: clock.today, now: clock.now)
+        #expect(!planned.contains { if case .eventSoon = $0.kind { true } else { false } })
+    }
+
+    @Test("A household-wide event tells everybody who is still here")
+    func householdWideEventsTellEveryone() throws {
+        var fixture = try makeFixture()
+        fixture.snapshot.events = [try event(fixture, participants: .everyone)]
+
+        let planned = ReminderPlanner(snapshot: fixture.snapshot)
+            .reminders(for: clock.today, now: clock.now)
+            .filter { if case .eventSoon = $0.kind { true } else { false } }
+        #expect(Set(planned.map(\.recipientID)) == Set(fixture.snapshot.members.map(\.id)))
+    }
+
+    @Test("The body says when, and where when there is a where")
+    func eventBodyNamesTheDetails() throws {
+        var fixture = try makeFixture()
+        fixture.snapshot.events = [try event(fixture, location: "Market Street")]
+
+        let reminder = try #require(
+            ReminderPlanner(snapshot: fixture.snapshot)
+                .reminders(for: clock.today, now: clock.now)
+                .first { if case .eventSoon = $0.kind { true } else { false } }
+        )
+        #expect(reminder.body.contains("Market Street"))
+        #expect(reminder.body.contains("·"))
+    }
+
+    @Test("An all-day event is announced in the morning rather than at midnight")
+    func allDayEventsFireInTheMorning() throws {
+        var fixture = try makeFixture()
+        fixture.snapshot.events = [
+            try event(fixture, title: "Half term", timing: .allDay, reminderMinutesBefore: 0)
+        ]
+
+        let reminder = try #require(
+            ReminderPlanner(snapshot: fixture.snapshot)
+                .reminders(for: clock.today, now: clock.now)
+                .first { if case .eventSoon = $0.kind { true } else { false } }
+        )
+        #expect(hour(of: reminder.fireDate) == ReminderSchedule.standard.morningHour)
+        #expect(reminder.body == "All day")
+    }
+
+    @Test("A long lead is planned on the day it fires, not the day the event happens")
+    func longLeadsArePlannedWhenTheyFire() throws {
+        var fixture = try makeFixture()
+        fixture.snapshot.events = [
+            try event(
+                fixture,
+                title: "Passports",
+                dayOffset: 5,
+                timing: .allDay,
+                reminderMinutesBefore: 5 * 24 * 60
+            )
+        ]
+
+        let today = ReminderPlanner(snapshot: fixture.snapshot)
+            .reminders(for: clock.today, now: clock.now)
+            .filter { if case .eventSoon = $0.kind { true } else { false } }
+        #expect(today.count == 1)
+
+        let onTheDay = ReminderPlanner(snapshot: fixture.snapshot)
+            .reminders(for: day(5), now: clock.now)
+            .filter { if case .eventSoon = $0.kind { true } else { false } }
+        #expect(onTheDay.isEmpty)
+    }
+
+    @Test("A cancelled event stops interrupting people")
+    func cancelledEventsAreSilent() throws {
+        var fixture = try makeFixture()
+        fixture.snapshot.events = [try event(fixture).cancelled(at: clock.now)]
+
+        let planned = ReminderPlanner(snapshot: fixture.snapshot)
+            .reminders(for: clock.today, now: clock.now)
+        #expect(!planned.contains { if case .eventSoon = $0.kind { true } else { false } })
+    }
+
+    @Test("A skipped week of a recurring event does not fire")
+    func skippedOccurrencesAreSilent() throws {
+        var fixture = try makeFixture()
+        fixture.snapshot.events = [
+            try event(fixture, recurrence: try .weekly(on: [.monday]))
+                .skipping(day(7), calendar: calendar)
+        ]
+
+        let planner = ReminderPlanner(snapshot: fixture.snapshot)
+        let thisWeek = planner.reminders(for: clock.today, now: clock.now)
+            .filter { if case .eventSoon = $0.kind { true } else { false } }
+        let nextWeek = planner.reminders(for: day(7), now: clock.now)
+            .filter { if case .eventSoon = $0.kind { true } else { false } }
+        #expect(thisWeek.count == 1)
+        #expect(nextWeek.isEmpty)
+    }
+
+    @Test("An appointment outranks everything else when somebody is over their cap")
+    func appointmentsSurviveTheCap() throws {
+        // Sam has a chore due today as well, so the cap of one genuinely has
+        // to choose between the morning list and the appointment.
+        var fixture = try makeFixture()
+        fixture.snapshot.events = [try event(fixture)]
+
+        let planned = ReminderPlanner(
+            snapshot: fixture.snapshot,
+            schedule: ReminderSchedule(maximumPerPersonPerDay: 1)
+        ).reminders(for: clock.today, now: clock.now)
+
+        let sams = planned.filter { $0.recipientID == fixture.sam.id }
+        #expect(sams.count == 1)
+        #expect(sams.first.map { if case .eventSoon = $0.kind { true } else { false } } == true)
+    }
+
+    @Test("The same event planned twice produces the same reminder identity")
+    func eventReminderIdentityIsStable() throws {
+        var fixture = try makeFixture()
+        fixture.snapshot.events = [try event(fixture)]
+
+        let planner = ReminderPlanner(snapshot: fixture.snapshot)
+        let first = planner.reminders(for: clock.today, now: clock.now).map(\.id)
+        let second = planner.reminders(for: clock.today, now: clock.now).map(\.id)
+        #expect(first == second)
+    }
+
+    @Test("A schedule saved before calendar reminders existed still sends them")
+    func olderSchedulesDefaultToSending() throws {
+        let json = Data(#"{"morningHour":7}"#.utf8)
+        let restored = try JSONDecoder().decode(ReminderSchedule.self, from: json)
+        #expect(restored.morningHour == 7)
+        #expect(restored.sendsEventReminders)
+    }
 }
