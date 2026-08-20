@@ -18,5 +18,8 @@ public enum FamilyHubStore {
     /// Bumped whenever the persisted shape changes. Migration steps are keyed
     /// off it, and it is written into every export so a backup taken today can
     /// still be understood by a build shipped a year from now.
-    public static let schemaVersion = 1
+    /// Version 2 added the meal plan. Version 1 archives restore unchanged;
+    /// a household that had no meal plan is a household with no planned meals,
+    /// which is exactly what the migration produces.
+    public static let schemaVersion = 2
 }

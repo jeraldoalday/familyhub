@@ -64,6 +64,37 @@ public struct HouseholdSnapshot: Sendable, Codable {
         self.shoppingItems = shoppingItems
         self.plannedMeals = plannedMeals
     }
+
+    /// Decodes a snapshot, tolerating collections a previous build never wrote.
+    ///
+    /// Synthesised decoding treats a missing array as a failure, which would
+    /// make every backup taken before a feature existed unreadable by the build
+    /// that adds it — the family's file would still be on disk and the app
+    /// would simply refuse it. Absent is read as empty instead, which is what
+    /// it means: that household had no meal plan because there was no meal plan
+    /// to have.
+    ///
+    /// The other collections are decoded the same way for the same reason,
+    /// including the ones that have always been written. A restore that fails
+    /// because a hand-edited file omits `rewards: []` helps nobody, and the
+    /// household is still refused if the parts that identify it are missing.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.household = try container.decode(Household.self, forKey: .household)
+        self.members = try container.decodeIfPresent([Member].self, forKey: .members) ?? []
+        self.chores = try container.decodeIfPresent([Chore].self, forKey: .chores) ?? []
+        self.completions =
+            try container.decodeIfPresent([ChoreCompletion].self, forKey: .completions) ?? []
+        self.ledgerEntries =
+            try container.decodeIfPresent([LedgerEntry].self, forKey: .ledgerEntries) ?? []
+        self.rewards = try container.decodeIfPresent([Reward].self, forKey: .rewards) ?? []
+        self.shoppingLists =
+            try container.decodeIfPresent([ShoppingList].self, forKey: .shoppingLists) ?? []
+        self.shoppingItems =
+            try container.decodeIfPresent([ShoppingItem].self, forKey: .shoppingItems) ?? []
+        self.plannedMeals =
+            try container.decodeIfPresent([PlannedMeal].self, forKey: .plannedMeals) ?? []
+    }
 }
 
 // MARK: - Lookups
