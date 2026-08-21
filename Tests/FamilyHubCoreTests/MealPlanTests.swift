@@ -102,6 +102,32 @@ struct MealPlanTests {
         #expect(plan.nextMeal(after: date(2), horizonDays: 7) == nil)
     }
 
+    @Test("A horizon of nothing looks no further than the rest of today")
+    func nextMealHonoursAZeroHorizon() throws {
+        let plan = plan([
+            try meal("Chilli", day: 2),
+            try meal("Fish pie", day: 3),
+        ])
+        // Tonight's dinner is still ahead at lunchtime, so it is the answer.
+        #expect(plan.nextMeal(after: date(2, hour: 12), horizonDays: 0)?.title.value == "Chilli")
+        // Once it has passed there is nothing left today, and a caller that
+        // said not to look further must not be handed tomorrow's.
+        #expect(plan.nextMeal(after: date(2, hour: 23), horizonDays: 0) == nil)
+        #expect(plan.nextMeal(after: date(2, hour: 23), horizonDays: -3) == nil)
+    }
+
+    @Test("A horizon of one day reaches tomorrow and no further")
+    func nextMealHonoursAOneDayHorizon() throws {
+        let plan = plan([
+            try meal("Fish pie", day: 3),
+            try meal("Roast", day: 4),
+        ])
+        #expect(plan.nextMeal(after: date(2, hour: 23), horizonDays: 1)?.title.value == "Fish pie")
+
+        let sparse = self.plan([try meal("Roast", day: 4)])
+        #expect(sparse.nextMeal(after: date(2, hour: 23), horizonDays: 1) == nil)
+    }
+
     // MARK: Days and weeks
 
     @Test("A week is seven days whether or not anything is planned on them")

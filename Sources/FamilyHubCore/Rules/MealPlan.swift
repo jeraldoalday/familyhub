@@ -69,7 +69,8 @@ public struct MealPlan: Sendable {
     ///
     /// - Parameters:
     ///   - moment: The current time.
-    ///   - horizonDays: How far ahead to look before giving up.
+    ///   - horizonDays: How far ahead to look before giving up. Zero looks no
+    ///     further than the rest of today.
     /// - Returns: The next planned meal, or `nil` if nothing is planned inside
     ///   the horizon.
     public func nextMeal(after moment: Date, horizonDays: Int = 14) -> PlannedMeal? {
@@ -82,7 +83,13 @@ public struct MealPlan: Sendable {
         for slot in remainingToday {
             if let meal = meal(on: today, slot: slot) { return meal }
         }
-        for offset in 1...max(1, horizonDays) {
+
+        // A horizon of nothing means today, and today has already been asked.
+        // Clamping the range to `1...1` instead — which is what avoiding an
+        // inverted range by widening it does — answers with tomorrow's dinner
+        // to a caller that said not to look past tonight.
+        guard horizonDays >= 1 else { return nil }
+        for offset in 1...horizonDays {
             guard let day = calendar.date(byAdding: .day, value: offset, to: today) else {
                 break
             }
