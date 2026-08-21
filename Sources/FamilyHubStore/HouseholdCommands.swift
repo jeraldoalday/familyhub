@@ -564,7 +564,17 @@ public struct HouseholdCommands: Sendable {
     /// Adds an item to a list, merging with a matching pending item rather than
     /// creating a duplicate row.
     ///
+    /// - Parameters:
+    ///   - name: What to buy.
+    ///   - quantity: How many.
+    ///   - category: Which aisle it belongs to.
+    ///   - listID: The list to add it to.
+    ///   - householdID: The household the list belongs to.
+    ///   - memberID: Who is adding it.
     /// - Returns: The item as it now stands, whether newly created or merged.
+    /// - Throws: ``DomainError/notFound(entity:id:)`` when there is no such
+    ///   list, ``DomainError/notPermitted(action:role:)``, or a validation
+    ///   error from ``ShoppingItem``.
     @discardableResult
     public func addShoppingItem(
         _ name: String,
@@ -577,6 +587,16 @@ public struct HouseholdCommands: Sendable {
         let snapshot = try await store.snapshot(of: householdID)
         let member = try snapshot.requireActiveMember(memberID)
         try Permissions.check(.manageShoppingList, for: member.role)
+
+        // Checked before writing, the same way `addMealIngredients` checks it.
+        // An item written against a list that is not there is a record no
+        // screen can render and nobody can delete: it belongs to the household,
+        // so it survives every cleanup, and it belongs to no list, so it never
+        // appears on one. The person who typed it watches it vanish and types
+        // it again.
+        guard snapshot.shoppingLists.contains(where: { $0.id == listID }) else {
+            throw DomainError.notFound(entity: "List", id: listID.description)
+        }
 
         // Merging rather than appending is what the person standing in the shop
         // wants: one line reading 'Milk ×2', not two lines they have to notice
@@ -773,7 +793,13 @@ public struct HouseholdCommands: Sendable {
     /// working document rather than a record: nobody wants last week's
     /// groceries kept forever, and the ledger does not reference them.
     ///
+    /// - Parameters:
+    ///   - listID: The list to clear.
+    ///   - householdID: The household the list belongs to.
+    ///   - actorID: Who is clearing it.
     /// - Returns: How many items were removed.
+    /// - Throws: ``DomainError/notFound(entity:id:)`` when there is no such
+    ///   list, or ``DomainError/notPermitted(action:role:)``.
     @discardableResult
     public func clearPurchasedItems(
         from listID: Identifier<ShoppingList>,
@@ -783,6 +809,13 @@ public struct HouseholdCommands: Sendable {
         let snapshot = try await store.snapshot(of: householdID)
         let actor = try snapshot.requireActiveMember(actorID)
         try Permissions.check(.manageShoppingList, for: actor.role)
+
+        // A list that is not there clears no items, which is indistinguishable
+        // from a list that was already clear — so the caller is told, rather
+        // than being handed a zero that means something else entirely.
+        guard snapshot.shoppingLists.contains(where: { $0.id == listID }) else {
+            throw DomainError.notFound(entity: "List", id: listID.description)
+        }
 
         let bought = snapshot.items(on: listID).purchased
         for item in bought {

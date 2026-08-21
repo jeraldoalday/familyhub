@@ -634,4 +634,51 @@ struct ChoreCommandTests {
         )
         #expect(try await f.store.snapshot(of: f.household.id).shoppingItems.count == 1)
     }
+
+    @Test("Adding to a list that is not there is refused rather than orphaned")
+    func addingToAMissingListIsRefused() async throws {
+        let f = try await makeFixture()
+        let missing = Identifier<ShoppingList>()
+
+        await #expect(throws: DomainError.self) {
+            try await f.commands.addShoppingItem(
+                "Milk", to: missing, in: f.household.id, by: f.owner.id
+            )
+        }
+        // The item that would otherwise be here belongs to the household and
+        // to no list, so nothing renders it and nothing cleans it up.
+        #expect(try await f.store.snapshot(of: f.household.id).shoppingItems.isEmpty)
+    }
+
+    @Test("Clearing a list that is not there says so rather than reporting zero")
+    func clearingAMissingListIsRefused() async throws {
+        let f = try await makeFixture()
+        await #expect(throws: DomainError.self) {
+            try await f.commands.clearPurchasedItems(
+                from: Identifier<ShoppingList>(), in: f.household.id, by: f.owner.id
+            )
+        }
+    }
+
+    @Test("An item still cannot be added to another household's list")
+    func addingToAnotherHouseholdsListIsRefused() async throws {
+        let f = try await makeFixture()
+        let other = try Household(name: "Flat 3B", timeZone: .gmt, createdAt: clock.now)
+        let otherOwner = try Member(
+            householdID: other.id, name: "Robin", role: .owner, joinedAt: clock.now
+        )
+        let theirList = try ShoppingList(
+            householdID: other.id, name: "Theirs", createdBy: otherOwner.id,
+            createdAt: clock.now
+        )
+        try await f.store.save(other)
+        try await f.store.save(otherOwner)
+        try await f.store.save(theirList)
+
+        await #expect(throws: DomainError.self) {
+            try await f.commands.addShoppingItem(
+                "Milk", to: theirList.id, in: f.household.id, by: f.owner.id
+            )
+        }
+    }
 }
