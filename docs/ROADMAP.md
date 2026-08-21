@@ -5,16 +5,24 @@ Two weeks, from a tested domain core to something submittable to App Review.
 ## Where things stand
 
 **Day 1 is done, and then some.** The domain and store layers are complete and
-tested: 438 tests covering recurrence, chore rotation, permissions, the points
+tested: 581 tests covering recurrence, chore rotation, permissions, the points
 ledger, shopping lists, streaks, the weekly recap, workload fairness, reminder
-planning, meal planning, the command layer, the change feed, and the backup
-format. `make check` builds, tests, and lints in a few seconds.
+planning, meal planning, the family calendar, the command layer, the change
+feed, and the backup format. `make check` builds, tests, and lints in a few
+seconds.
 
 Some of that was pulled forward out of later days on purpose. Streaks,
 reminders, and the recap are all decisions about *what the app should say*, and
 deciding those against a test suite is faster and considerably more honest than
 deciding them against a running build at seven in the evening. What they leave
 for their own days is wiring rather than judgement.
+
+The calendar was pulled forward for a different reason. It was the last feature
+the README promised that the domain could not answer a single question about,
+and the error type had been carrying `eventTitle` and `manageCalendar` since
+before there was a record for either to refer to. Building it against the
+recurrence engine that already existed cost a fraction of what building it
+after the views depend on a shape would have.
 
 What does **not** exist yet is the app itself. That is deliberate — the
 business rules were worth getting right first, because they are the part that
@@ -53,9 +61,11 @@ first build. Expect this to be the largest day of the fortnight.
 
 **Day 4 — the rest of the surface.** Shopping, family settings, member
 management, the approvals queue, and the points history. Same pattern as day 3,
-so it should move faster. The meal plan's week grid is the stretch item here
-rather than a commitment: `MealPlan` already answers everything the grid needs
-to render, so it is a day's view code whenever there is a day for it.
+so it should move faster. The meal plan's week grid and the calendar's are the
+stretch items here rather than commitments: `MealPlan` and `FamilyCalendar`
+already answer everything either grid needs to render — including which of two
+things a child has been double-booked into — so each is a day's view code
+whenever there is a day for it.
 
 ## Milestone 2 — making it feel finished (days 5–8)
 
@@ -73,10 +83,11 @@ cheaper now than after notifications and widgets depend on the mess.
 **Day 7 — notifications.** `ReminderPlanner` already decides what is worth
 saying and when: the morning digest, the approval queue, the streak about to
 break, the afternoon nudge to whoever is cooking, the Sunday prompt about next
-week's undecided dinners, and the per-person daily cap that keeps the channel
-from being switched off. What is left is the platform half — authorisation,
-translating each `Reminder` into a `UNNotificationRequest`, and re-planning on
-launch and on change. Smaller than it was.
+week's undecided dinners, the appointment that outranks all of them, and the
+per-person daily cap that keeps the channel from being switched off. What is
+left is the platform half — authorisation, translating each `Reminder` into a
+`UNNotificationRequest`, and re-planning on launch and on change. Smaller than
+it was.
 
 **Day 8 — widgets and Shortcuts.** A home-screen widget for today's chores and
 a Lock Screen widget for the point balance. App Intents for "add to the
@@ -130,8 +141,25 @@ Cutting these is what makes the rest fit:
   the screen: it lands with the rest of the interface work, and if the fortnight
   slips it is the first surface to cut, because a family can plan meals through
   the shopping list they already have.
-- **A family calendar.** Overlaps heavily with the system Calendar app; needs
-  its own thinking rather than a fortnight's leftovers.
+- **A family calendar *interface*.** The domain is built — recurring events on
+  the same engine the chores use, all-day and timed entries, who each one
+  concerns, and per-person clash detection — and the error type had been
+  naming `eventTitle` and `manageCalendar` since long before there was a record
+  to refer to. What is out of scope is the screen, on the same terms as the
+  meal plan's.
+
+  This bullet previously said the whole feature was out of scope because it
+  "overlaps heavily with the system Calendar app". That argument was wrong in a
+  way worth recording. The overlap is with the *storage* of appointments, which
+  is the part FamilyHub does not want; what a family cannot get from the
+  Calendar app is a calendar that knows the same people the chore rota knows,
+  so that "Sam is at swimming" and "Sam has the bins tonight" are two facts
+  about one child rather than two apps that have never met. Clash detection per
+  person is the visible form of that, and it is not something an EventKit
+  import would have produced.
+- **Reading the system calendar.** EventKit import stays out. It is a
+  permission prompt, a sync loop, and a merge policy, all in service of a
+  feature nobody asked for in the first week.
 - **Android or web.** The domain layer is portable Swift with no Apple
   dependency beyond Foundation, so this stays open. It is not v1.
 

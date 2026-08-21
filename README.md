@@ -6,7 +6,8 @@ to, a meal plan that turns itself into the shopping, and a family calendar — a
 in one native iOS/iPadOS app.
 
 > **Status:** in active development. The domain and store layers are complete
-> and tested; the app itself is the remaining work. See
+> and tested — chores, points, shopping, meals, and the calendar; the app itself
+> is the remaining work. See
 > [`docs/ROADMAP.md`](docs/ROADMAP.md) for the shipping plan.
 
 ---
@@ -45,7 +46,7 @@ The domain and store layers build and test with nothing but the Swift toolchain:
 
 ```bash
 make check      # build + test + lint + release build — the pre-commit gate
-make test       # 438 tests
+make test       # 581 tests
 make format     # reformat in place
 make lint       # the exact formatting check CI runs
 make release    # the optimised build CI also runs
@@ -90,9 +91,10 @@ open FamilyHub.xcodeproj   # added in Milestone 2 — see docs/ROADMAP.md
 Sources/
   FamilyHubCore/
     Models/            Households, members, chores, completions, rewards,
-                       lists, planned meals
+                       lists, planned meals, calendar events
     Scheduling/        Recurrence engine, weekdays, reminder planning
-    Rules/             Permissions, points ledger, streaks, insights, meal plan
+    Rules/             Permissions, points ledger, streaks, insights, meal
+                       plan, family calendar
     Support/           Identifiers, validation, errors, the injected clock
   FamilyHubStore/      Store contract, in-memory store, commands, change feed,
                        backup format, demo data
@@ -115,6 +117,7 @@ docs/
 | Points ledger, rewards, redemption rules | ✅ complete, tested |
 | Shopping lists with aisle grouping | ✅ complete, tested |
 | Meal planning, cooking rota, and the shopping it implies | ✅ complete, tested |
+| Family calendar, recurring events, and clash detection | ✅ complete, tested |
 | Streaks, per chore and per member | ✅ complete, tested |
 | Weekly recap and workload fairness | ✅ complete, tested |
 | Reminder planning (what to say, and when) | ✅ complete, tested |

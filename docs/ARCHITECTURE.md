@@ -27,7 +27,7 @@ and then it stops being faster, for three specific reasons.
 **Testability.** Every rule in this app is about time — recurrence, streaks,
 overdue states, cooldowns. Rules that live on a `@Model` need a container to
 test, which means tests that take seconds instead of microseconds, which in
-practice means tests that do not get written. The 438 tests here run in under
+practice means tests that do not get written. The 581 tests here run in under
 half a second because none of them touch a database.
 
 **Replaceability.** Local-only storage today, iCloud sync later. With rules in
@@ -102,6 +102,22 @@ with a year of history.
 day-and-slot in the initialiser, so rendering a week is twenty-one lookups
 rather than seven passes over every meal the household has ever planned.
 
+**`FamilyCalendar`** faces the chore version of that problem rather than the
+meal version, because an event recurs and a meal does not. It expands each
+event's schedule once across the window asked for; asking each event whether it
+falls on each day walks a two-year rota seven times per event to draw one week.
+Its clash detection is quadratic by nature — every occurrence against every
+later one — so the sort by start time and the early exit are what keep it
+bounded, and `HotPathTests` covers both.
+
+**A day and a time are different things.** A chore belongs to a day; an event
+happens at four o'clock. The event's time is stored as minutes past midnight in
+the household's timezone rather than as a moment, so a recurring lesson is at
+four on every day it recurs — including the two days a year a stored `Date`
+would move it by an hour. Spans are built by adding minutes to the start of the
+day rather than by setting an hour on it, because on the morning the clocks go
+forward there is no half past one and `date(bySettingHour:)` answers nil for it.
+
 **Conflict resolution** lives in
 `Collection<ChoreCompletion>.deduplicatedByOccurrence()` and, in the same shape,
 in `Collection<PlannedMeal>.deduplicatedBySlot()`. Both resolve by the earlier
@@ -149,9 +165,9 @@ drop the write entirely.
 
 `FamilyHubStore.schemaVersion` is stamped into every export, and
 `HouseholdArchive.migrated()` is the ladder that brings an older file up to the
-current shape. Version 2 added the meal plan; version 1 files restore as a
-household with no planned meals, which is not a gap to be filled in but the
-truth about a household that predated the feature.
+current shape. Version 2 added the meal plan and version 3 the family calendar; an older file
+restores as a household with no planned meals and no events, which is not a gap
+to be filled in but the truth about a household that predated the feature.
 
 Two habits keep that cheap. `HouseholdSnapshot` decodes every collection as
 optional-with-empty rather than required, so a backup written before a feature
@@ -164,7 +180,9 @@ or fail to decode entirely, over a field added later.
 The rule that follows: adding a collection to the snapshot means bumping the
 version, adding a migration case, and testing it against a file with the key
 genuinely absent. Encoding an empty array and reading it back only proves the
-current encoder can read itself.
+current encoder can read itself. The calendar followed exactly that path and
+the migration step for it is one line in a switch, which is the return on
+having built the ladder at version 1 when it was the identity function.
 
 ## What would need to change for sync
 
