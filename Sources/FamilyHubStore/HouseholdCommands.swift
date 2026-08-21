@@ -445,7 +445,22 @@ public struct HouseholdCommands: Sendable {
         return approved
     }
 
-    /// Sends a completion back, leaving the points unbanked.
+    /// Sends a completion back, taking its points with it.
+    ///
+    /// Usually there are none to take: in a household that requires approval a
+    /// child's work is pending until an adult signs it off, so rejecting it
+    /// simply leaves it unpaid. But approval is off by default and never
+    /// applies to an adult's own chores, which means the common case is work
+    /// that has *already* been paid for — and sending it back has to undo that,
+    /// or the household pays for a chore it has just declared undone and then
+    /// pays again when somebody redoes it.
+    ///
+    /// The reversal is an entry rather than an erasure, because the ledger is
+    /// append-only and because a child whose balance drops needs to see why. It
+    /// carries the reason the adult gave, so the history row explains itself.
+    ///
+    /// - Throws: ``DomainError/notPermitted(action:role:)`` or
+    ///   ``DomainError/notFound(entity:id:)``.
     @discardableResult
     public func rejectCompletion(
         _ completionID: Identifier<ChoreCompletion>,
@@ -461,8 +476,20 @@ public struct HouseholdCommands: Sendable {
 
         try Permissions.authorizeApproval(of: completion, by: actor)
 
+        // Rejecting twice would reverse twice. Worth guarding for the reason
+        // approving twice is: a slow network makes a parent tap the button
+        // again, and the second tap must not cost the child another ten points.
+        guard !completion.approval.isRejected else { return completion }
+        let wasPaid = completion.approval.countsTowardBalance
+
         let rejected = completion.rejected(by: actorID, at: dateProvider.now, reason: reason)
         try await store.save(rejected)
+
+        if wasPaid, completion.pointsAwarded > 0 {
+            try await store.append(
+                .sentBack(completion, at: dateProvider.now, note: reason)
+            )
+        }
         return rejected
     }
 

@@ -285,6 +285,95 @@ struct HouseholdCommandsTests {
         #expect(snapshot.ledger.balance(for: f.child.id) == 0)
     }
 
+    @Test("Sending back work that was already paid for takes the points back")
+    func rejectionReversesBankedPoints() async throws {
+        // A household that does not require approval banks the points as soon
+        // as the chore is ticked off, so a parent who then sends it back is
+        // rejecting work that has already been paid for.
+        let f = try await makeFixture(requiresApproval: false)
+        let completion = try await f.commands.completeChore(
+            f.chore.id, on: clock.today, in: f.household.id, by: f.child.id
+        )
+        var snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.ledger.balance(for: f.child.id) == 10)
+
+        try await f.commands.rejectCompletion(
+            completion.id, in: f.household.id, by: f.parent.id, reason: "Bin still full"
+        )
+
+        snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.ledger.balance(for: f.child.id) == 0)
+    }
+
+    @Test("The reversal is a ledger entry of its own, not a deletion")
+    func reversalIsRecorded() async throws {
+        let f = try await makeFixture(requiresApproval: false)
+        let completion = try await f.commands.completeChore(
+            f.chore.id, on: clock.today, in: f.household.id, by: f.child.id
+        )
+        try await f.commands.rejectCompletion(
+            completion.id, in: f.household.id, by: f.parent.id, reason: "Bin still full"
+        )
+
+        let snapshot = try await f.store.snapshot(of: f.household.id)
+        let history = snapshot.ledger.history(for: f.child.id)
+        #expect(history.count == 2)
+        let reversal = try #require(history.first { $0.amount < 0 })
+        #expect(reversal.amount == -10)
+        #expect(reversal.source == .choreSentBack(completion.id))
+        #expect(reversal.note == "Bin still full")
+    }
+
+    @Test("Sending back work nobody had been paid for takes nothing back")
+    func rejectionOfPendingWorkAddsNothing() async throws {
+        let f = try await makeFixture(requiresApproval: true)
+        let completion = try await f.commands.completeChore(
+            f.chore.id, on: clock.today, in: f.household.id, by: f.child.id
+        )
+        try await f.commands.rejectCompletion(
+            completion.id, in: f.household.id, by: f.parent.id
+        )
+
+        let snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.ledgerEntries.isEmpty)
+        #expect(snapshot.ledger.balance(for: f.child.id) == 0)
+    }
+
+    @Test("Sending the same work back twice takes the points back once")
+    func rejectingTwiceReversesOnce() async throws {
+        let f = try await makeFixture(requiresApproval: false)
+        let completion = try await f.commands.completeChore(
+            f.chore.id, on: clock.today, in: f.household.id, by: f.child.id
+        )
+        try await f.commands.rejectCompletion(
+            completion.id, in: f.household.id, by: f.parent.id
+        )
+        try await f.commands.rejectCompletion(
+            completion.id, in: f.household.id, by: f.parent.id
+        )
+
+        let snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.ledger.balance(for: f.child.id) == 0)
+        #expect(snapshot.ledgerEntries.count == 2)
+    }
+
+    @Test("A chore sent back and done again pays exactly once")
+    func redoAfterAPaidRejectionPaysOnce() async throws {
+        let f = try await makeFixture(requiresApproval: false)
+        let first = try await f.commands.completeChore(
+            f.chore.id, on: clock.today, in: f.household.id, by: f.child.id
+        )
+        try await f.commands.rejectCompletion(
+            first.id, in: f.household.id, by: f.parent.id, reason: "Bin still full"
+        )
+        try await f.commands.completeChore(
+            f.chore.id, on: clock.today, in: f.household.id, by: f.child.id
+        )
+
+        let snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.ledger.balance(for: f.child.id) == 10)
+    }
+
     @Test("A chore sent back can be done again")
     func rejectedChoreCanBeRedone() async throws {
         let f = try await makeFixture(requiresApproval: true)

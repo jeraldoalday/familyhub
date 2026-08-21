@@ -66,6 +66,15 @@ extension LedgerEntry {
         /// A chore was completed and approved.
         case choreCompleted(Identifier<ChoreCompletion>)
 
+        /// A chore that had already been paid for was sent back by an adult.
+        ///
+        /// The ledger is append-only, so taking points back is an entry rather
+        /// than an erasure. That is not merely a technical constraint: a child
+        /// whose balance drops needs to be able to see why it dropped, and a
+        /// history with a gap where ten points used to be is exactly the thing
+        /// that makes them stop trusting the number.
+        case choreSentBack(Identifier<ChoreCompletion>)
+
         /// A reward was redeemed.
         case rewardRedeemed(Identifier<Reward>)
 
@@ -82,6 +91,7 @@ extension LedgerEntry {
         public var label: String {
             switch self {
             case .choreCompleted: "Chore"
+            case .choreSentBack: "Sent back"
             case .rewardRedeemed: "Reward"
             case .adjustment: "Adjustment"
             case .bonus: "Bonus"
@@ -93,6 +103,7 @@ extension LedgerEntry {
         public var symbolName: String {
             switch self {
             case .choreCompleted: "checkmark.circle.fill"
+            case .choreSentBack: "arrow.uturn.backward.circle.fill"
             case .rewardRedeemed: "gift.fill"
             case .adjustment: "slider.horizontal.3"
             case .bonus: "star.fill"
@@ -104,7 +115,10 @@ extension LedgerEntry {
         /// marks so a child can see the change was deliberate rather than a bug.
         public var wasManual: Bool {
             switch self {
-            case .adjustment, .bonus, .reset: true
+            // Sending work back is an adult's decision, and the history marks
+            // it as one so a child can see the change was deliberate rather
+            // than a bug — which is the entire reason this flag exists.
+            case .adjustment, .bonus, .reset, .choreSentBack: true
             case .choreCompleted, .rewardRedeemed: false
             }
         }
@@ -125,6 +139,36 @@ extension LedgerEntry {
             amount: completion.pointsAwarded,
             source: .choreCompleted(completion.id),
             occurredAt: completion.completedAt,
+            note: note
+        )
+    }
+
+    /// The entry taking back what an approved completion had already paid.
+    ///
+    /// Negated here rather than at the call site, for the same reason a
+    /// redemption is: a caller cannot accidentally credit points by rejecting
+    /// somebody's work.
+    ///
+    /// Stamped with the moment of the rejection rather than of the completion,
+    /// so the history reads in the order the family experienced it — the points
+    /// arrived, and then later they went away.
+    ///
+    /// - Parameters:
+    ///   - completion: The completion being sent back.
+    ///   - date: When the adult sent it back.
+    ///   - note: The reason they gave, if they gave one.
+    /// - Returns: The reversing entry.
+    public static func sentBack(
+        _ completion: ChoreCompletion,
+        at date: Date,
+        note: String? = nil
+    ) -> LedgerEntry {
+        LedgerEntry(
+            householdID: completion.householdID,
+            memberID: completion.completedBy,
+            amount: -abs(completion.pointsAwarded),
+            source: .choreSentBack(completion.id),
+            occurredAt: date,
             note: note
         )
     }
