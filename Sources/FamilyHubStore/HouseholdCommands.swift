@@ -257,7 +257,8 @@ public struct HouseholdCommands: Sendable {
         in householdID: Identifier<Household>,
         by actorID: Identifier<Member>
     ) async throws -> Chore {
-        try await updatingChore(choreID, in: householdID, by: actorID) { chore, now in
+        let now = dateProvider.now
+        return try await updatingChore(choreID, in: householdID, by: actorID) { chore, _ in
             chore.archived(at: now)
         }
     }
@@ -285,9 +286,8 @@ public struct HouseholdCommands: Sendable {
         in householdID: Identifier<Household>,
         by actorID: Identifier<Member>
     ) async throws -> Chore {
-        let calendar = try await store.snapshot(of: householdID).household.calendar()
-        return try await updatingChore(choreID, in: householdID, by: actorID) { chore, _ in
-            chore.skipping(day, calendar: calendar)
+        try await updatingChore(choreID, in: householdID, by: actorID) { chore, snapshot in
+            chore.skipping(day, calendar: snapshot.household.calendar())
         }
     }
 
@@ -299,9 +299,8 @@ public struct HouseholdCommands: Sendable {
         in householdID: Identifier<Household>,
         by actorID: Identifier<Member>
     ) async throws -> Chore {
-        let calendar = try await store.snapshot(of: householdID).household.calendar()
-        return try await updatingChore(choreID, in: householdID, by: actorID) { chore, _ in
-            chore.unskipping(day, calendar: calendar)
+        try await updatingChore(choreID, in: householdID, by: actorID) { chore, snapshot in
+            chore.unskipping(day, calendar: snapshot.household.calendar())
         }
     }
 
@@ -1350,18 +1349,25 @@ public struct HouseholdCommands: Sendable {
     /// The four schedule-editing commands differ only in the transform. Sharing
     /// the load-check-save around them is what keeps the permission check from
     /// being present on three of them and missing from the fourth.
+    ///
+    /// The transform receives the snapshot rather than only the clock, so that
+    /// a command needing the household's calendar reads it from the load this
+    /// helper has already done. The two that do were loading it separately
+    /// first, which is a whole second read of every record in the household to
+    /// answer "which timezone" — and, worse, a read of a *different* household
+    /// state than the one the write is based on.
     private func updatingChore(
         _ choreID: Identifier<Chore>,
         in householdID: Identifier<Household>,
         by actorID: Identifier<Member>,
-        _ transform: (Chore, Date) throws -> Chore
+        _ transform: (Chore, HouseholdSnapshot) throws -> Chore
     ) async throws -> Chore {
         let snapshot = try await store.snapshot(of: householdID)
         let actor = try snapshot.requireActiveMember(actorID)
         let chore = try snapshot.requireChore(choreID)
         try Permissions.check(.createChore, for: actor.role)
 
-        let updated = try transform(chore, dateProvider.now)
+        let updated = try transform(chore, snapshot)
         try await store.save(updated)
         return updated
     }
