@@ -179,4 +179,70 @@ struct DemoHouseholdTests {
         let sam = try #require(snapshot.activeMembers.first { $0.name.value == "Sam" })
         #expect(!cooks.contains(sam.id))
     }
+
+    // MARK: The calendar
+
+    @Test("The demo week has something on the calendar every day it should")
+    func calendarIsPopulated() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+        #expect(!snapshot.events.isEmpty)
+        #expect(snapshot.events.allSatisfy { $0.householdID == snapshot.household.id })
+        #expect(snapshot.activeEvents.count == snapshot.events.count)
+
+        let week = snapshot.familyCalendar.week(containing: clock.today)
+        #expect(week.count >= 5)
+    }
+
+    @Test("The demo calendar has a clash, because that is what a shared one is for")
+    func calendarHasSomethingToWarnAbout() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+        let clashes = snapshot.familyCalendar.clashes(
+            from: clock.today,
+            to: clock.day(offsetFromToday: 6),
+            among: snapshot.members
+        )
+        #expect(!clashes.isEmpty)
+        let clash = try #require(clashes.first)
+        #expect(clash.members.count == 1)
+        #expect(clash.overlapMinutes > 0)
+    }
+
+    @Test("The demo calendar shows an all-day entry alongside timed ones")
+    func calendarMixesAllDayAndTimed() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+        #expect(snapshot.events.contains { $0.isAllDay })
+        #expect(snapshot.events.contains { !$0.isAllDay })
+        #expect(snapshot.events.contains { $0.participants == .everyone })
+        #expect(snapshot.events.contains { !$0.participants.namedMemberIDs.isEmpty })
+    }
+
+    @Test("The demo has a commitment that has been running for a while")
+    func calendarHasARecurringEntry() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+        let repeating = snapshot.events.filter { $0.recurrence.isRepeating }
+        let recurring = try #require(repeating.first)
+        #expect(recurring.startDate < clock.today)
+
+        let engine = snapshot.engine
+        let past = recurring.occurrences(
+            in: clock.day(offsetFromToday: -30)...clock.day(offsetFromToday: -1), using: engine
+        )
+        #expect(past.count >= 3)
+    }
+
+    @Test("Some of the demo calendar asks to be reminded about, and some does not")
+    func calendarHasBothLoudAndQuietEntries() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+        #expect(snapshot.events.contains { $0.hasReminder })
+        #expect(snapshot.events.contains { !$0.hasReminder })
+    }
+
+    @Test("Every named participant is somebody still in the household")
+    func calendarNamesRealPeople() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+        let active = Set(snapshot.activeMembers.map(\.id))
+        for event in snapshot.events {
+            #expect(Set(event.participants.namedMemberIDs).isSubset(of: active))
+        }
+    }
 }

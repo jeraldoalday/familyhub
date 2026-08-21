@@ -319,6 +319,77 @@ public enum DemoHousehold {
             )
         }
 
+        // MARK: The calendar
+
+        // A week with enough on it to be worth looking at, and deliberately
+        // one clash. A demo calendar where nothing overlaps shows the grid but
+        // not the reason a family shares one — Sam is at swimming while the
+        // dentist is expecting him, and the week view has something to warn
+        // about on first launch.
+        let events:
+            [(String, String?, CalendarEvent.Kind, Int, CalendarEvent.Timing, [Member], Int?)] = [
+                (
+                    "Swimming", "Leisure centre", .activity, 2,
+                    .at(hour: 16, lasting: 60), [sam], 30
+                ),
+                (
+                    "Dentist", "Market Street", .appointment, 2,
+                    .at(hour: 16, minute: 30, lasting: 30), [sam], 60
+                ),
+                (
+                    "Football training", "Park pitches", .activity, 3,
+                    .at(hour: 17, minute: 30, lasting: 90), [alex], nil
+                ),
+                (
+                    "Parents' evening", "Alex's school", .school, 4,
+                    .at(hour: 18, lasting: 60), [jerald, mary], 60
+                ),
+                (
+                    "Inset day", nil, .school, 5, .allDay, [alex, sam], nil
+                ),
+                (
+                    "Grandma visits", nil, .social, 6,
+                    .at(hour: 12, lasting: 4 * 60), [], nil
+                ),
+            ]
+        let calendarEvents = try events.map { entry in
+            let (title, location, kind, dayOffset, timing, people, lead) = entry
+            return try CalendarEvent(
+                householdID: household.id,
+                title: title,
+                location: location,
+                kind: kind,
+                startDate: calendar.date(byAdding: .day, value: dayOffset, to: today) ?? today,
+                timing: timing,
+                // Nobody named means the whole household, which is what
+                // "Grandma visits" is and what "Swimming" is not.
+                participants: people.isEmpty ? .everyone : .members(people.map(\.id)),
+                reminderMinutesBefore: lead,
+                createdBy: mary.id,
+                createdAt: calendar.date(byAdding: .day, value: -7, to: today) ?? today,
+                calendar: calendar
+            )
+        }
+
+        // The one recurring entry, added separately because it starts in the
+        // past: a weekly commitment that has been running for a month reads as
+        // part of the household's life rather than as something typed in for
+        // the screenshot.
+        let piano = try CalendarEvent(
+            householdID: household.id,
+            title: "Piano lesson",
+            location: "Mrs Okafor's",
+            kind: .activity,
+            startDate: monthAgo,
+            timing: .at(hour: 17, lasting: 45),
+            recurrence: try .weekly(on: [.thursday]),
+            participants: .members([sam.id]),
+            reminderMinutesBefore: 30,
+            createdBy: mary.id,
+            createdAt: monthAgo,
+            calendar: calendar
+        )
+
         return HouseholdSnapshot(
             household: household,
             members: members,
@@ -328,7 +399,8 @@ public enum DemoHousehold {
             rewards: rewards,
             shoppingLists: [groceries, hardware],
             shoppingItems: shoppingItems,
-            plannedMeals: plannedMeals
+            plannedMeals: plannedMeals,
+            events: calendarEvents + [piano]
         )
     }
 
