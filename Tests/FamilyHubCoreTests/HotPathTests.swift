@@ -149,6 +149,42 @@ struct HotPathTests {
         )
     }
 
+    /// A calendar two years deep: a handful of long-running weekly
+    /// commitments plus a daily one, all of them still recurring today.
+    ///
+    /// Recurring entries rather than one-off ones on purpose. A thousand
+    /// single-day events is a thousand rows to filter, which is easy; a
+    /// commitment that started two years ago is a schedule that has to be
+    /// walked from its start every time somebody asks about this week, which is
+    /// the shape that goes quadratic.
+    private func withCalendar(
+        _ busy: BusyHousehold,
+        eventCount: Int = 20,
+        historyDays: Int = 730
+    ) throws -> BusyHousehold {
+        var snapshot = busy.snapshot
+        let members = busy.members
+        let start =
+            calendar.date(byAdding: .day, value: -historyDays, to: busy.today) ?? busy.today
+
+        snapshot.events = try (0..<eventCount).map { index in
+            let weekday = Weekday.allCases[index % Weekday.allCases.count]
+            return try CalendarEvent(
+                householdID: snapshot.household.id,
+                title: "Commitment \(index)",
+                location: "Somewhere \(index)",
+                startDate: start,
+                timing: .at(hour: 9 + index % 8, lasting: 60),
+                recurrence: index % 5 == 0 ? .daily : try .weekly(on: [weekday]),
+                participants: .members([members[index % members.count].id]),
+                createdBy: members[0].id,
+                createdAt: start,
+                calendar: calendar
+            )
+        }
+        return BusyHousehold(snapshot: snapshot, today: busy.today, members: members)
+    }
+
     /// How long `work` took.
     private func duration(of work: () throws -> Void) rethrows -> TimeInterval {
         let started = Date()
@@ -293,6 +329,92 @@ struct HotPathTests {
             #expect(
                 plan.meals(on: day).map(\.id)
                     == plan.meals.onDay(day, calendar: calendar).map(\.id)
+            )
+        }
+    }
+
+    // MARK: The calendar
+
+    @Test("A week of the calendar stays fast on two years of commitments")
+    func calendarWeekIsFastOnALongHistory() throws {
+        // Expanding each event's schedule once across the window rather than
+        // asking each event about each day. The second shape is seven walks of
+        // a two-year rota per event, on the screen the feature opens on.
+        let busy = try withCalendar(try makeBusyHousehold(choreCount: 1, historyDays: 30))
+        var count = 0
+
+        let elapsed = duration {
+            count = busy.snapshot.familyCalendar.week(containing: busy.today).count
+        }
+
+        #expect(count > 0)
+        #expect(elapsed < 1.0)
+    }
+
+    @Test("One person's week stays fast on two years of commitments")
+    func filteredCalendarWeekIsFast() throws {
+        let busy = try withCalendar(try makeBusyHousehold(choreCount: 1, historyDays: 30))
+        var count = 0
+
+        let elapsed = duration {
+            count =
+                busy.snapshot.familyCalendar
+                .week(containing: busy.today, for: busy.members[1].id)
+                .count
+        }
+
+        #expect(count > 0)
+        #expect(elapsed < 1.0)
+    }
+
+    @Test("Finding what is next stays fast on two years of commitments")
+    func nextUpIsFastOnALongHistory() throws {
+        let busy = try withCalendar(try makeBusyHousehold(choreCount: 1, historyDays: 30))
+        var found: FamilyCalendar.Occurrence?
+
+        let elapsed = duration {
+            found = busy.snapshot.familyCalendar.next(after: busy.today)
+        }
+
+        #expect(found != nil)
+        #expect(elapsed < 1.0)
+    }
+
+    @Test("Checking a month for clashes stays fast on two years of commitments")
+    func clashDetectionIsFastOnALongHistory() throws {
+        // The one query here that is quadratic by nature — every occurrence
+        // against every later one — so what is being guarded is that the
+        // expansion feeding it is not, and that the early exit on the sorted
+        // list actually fires.
+        let busy = try withCalendar(try makeBusyHousehold(choreCount: 1, historyDays: 30))
+        let monthEnd = try #require(
+            calendar.date(byAdding: .day, value: 30, to: busy.today)
+        )
+        var clashes = 0
+
+        let elapsed = duration {
+            clashes =
+                busy.snapshot.familyCalendar
+                .clashes(from: busy.today, to: monthEnd, among: busy.members)
+                .count
+        }
+
+        #expect(clashes >= 0)
+        #expect(elapsed < 1.0)
+    }
+
+    @Test("A day of the calendar gives the same answer read alone as inside a week")
+    func dayMatchesTheWeekItIsIn() throws {
+        // Speed is only worth having if the answer is unchanged, and a day read
+        // on its own takes a different route through the expansion than the
+        // same day read as part of a week.
+        let busy = try withCalendar(try makeBusyHousehold(choreCount: 1, historyDays: 30))
+        let familyCalendar = busy.snapshot.familyCalendar
+        let week = familyCalendar.week(containing: busy.today)
+
+        for day in week.days {
+            #expect(
+                familyCalendar.occurrences(on: day.day).map(\.id) == day.occurrences.map(\.id)
             )
         }
     }
