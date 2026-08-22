@@ -661,6 +661,96 @@ struct HouseholdCommandsTests {
         #expect(item.category == .frozen)
     }
 
+    @Test("A pasted list becomes rows, with aisles and quantities")
+    func pastingAList() async throws {
+        let f = try await makeFixture()
+        let added = try await f.commands.addShoppingItems(
+            from: """
+                - 2 pints milk
+                Sourdough
+                • 6 eggs
+                """,
+            to: f.list.id, in: f.household.id, by: f.parent.id
+        )
+
+        #expect(added.map(\.name.value) == ["milk", "Sourdough", "eggs"])
+        #expect(added.map(\.quantity) == [2, 1, 6])
+        #expect(added.map(\.category) == [.dairy, .bakery, .dairy])
+        #expect(added.first?.unit == "pints")
+        #expect(added.allSatisfy { $0.addedBy == f.parent.id })
+
+        let snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.items(on: f.list.id).count == 3)
+    }
+
+    @Test("A pasted line merges with what is already on the list")
+    func pastingMergesWithExistingRows() async throws {
+        // Unlike the meal plan's ingredients, which are skipped when already
+        // there: a person who typed "2 milk" while the list says milk has
+        // counted something, whereas three recipes mentioning milk have not.
+        let f = try await makeFixture()
+        try await f.commands.addShoppingItem(
+            "Milk", to: f.list.id, in: f.household.id, by: f.parent.id
+        )
+
+        let added = try await f.commands.addShoppingItems(
+            from: "2 milk\nBread", to: f.list.id, in: f.household.id, by: f.child.id
+        )
+
+        #expect(added.count == 2)
+        #expect(added.first?.quantity == 3)
+        #expect(added.first?.name.value == "Milk")
+
+        let snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.items(on: f.list.id).count == 2)
+    }
+
+    @Test("The same thing spelled two ways in one paste is one row")
+    func pastingMergesWithinTheSamePaste() async throws {
+        // The parser and the list fold names the same way, so this collapses
+        // upstream — but the command still tracks what it has written as it
+        // goes, so that the two foldings drifting apart later costs a
+        // duplicate row rather than a duplicate row nobody notices.
+        let f = try await makeFixture()
+        let added = try await f.commands.addShoppingItems(
+            from: "Bánh mì\nbanh mi", to: f.list.id, in: f.household.id, by: f.parent.id
+        )
+
+        #expect(added.count == 1)
+        let snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.items(on: f.list.id).count == 1)
+        #expect(snapshot.items(on: f.list.id).first?.quantity == 2)
+    }
+
+    @Test("Pasting nothing buyable adds nothing")
+    func pastingNothing() async throws {
+        let f = try await makeFixture()
+        let added = try await f.commands.addShoppingItems(
+            from: "\n  \n- \n", to: f.list.id, in: f.household.id, by: f.parent.id
+        )
+        #expect(added.isEmpty)
+
+        let snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.shoppingItems.isEmpty)
+    }
+
+    @Test("A paste aimed at a list that is not there is refused before it writes")
+    func pastingToAMissingList() async throws {
+        // The same guard the single-item command has, and for the same reason:
+        // an item on no list is a record no screen renders and nobody deletes.
+        let f = try await makeFixture()
+        let ghost = Identifier<ShoppingList>()
+
+        await #expect(throws: DomainError.notFound(entity: "List", id: ghost.description)) {
+            try await f.commands.addShoppingItems(
+                from: "Milk\nBread", to: ghost, in: f.household.id, by: f.parent.id
+            )
+        }
+
+        let snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.shoppingItems.isEmpty)
+    }
+
     @Test("Editing an item changes only the fields it was given")
     func editingAnItemIsNarrow() async throws {
         let f = try await makeFixture()

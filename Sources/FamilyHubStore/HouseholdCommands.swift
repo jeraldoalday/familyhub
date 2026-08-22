@@ -703,6 +703,84 @@ public struct HouseholdCommands: Sendable {
         return item
     }
 
+    /// Adds a whole pasted list at once.
+    ///
+    /// The bulk form of ``addShoppingItem(_:quantity:category:to:in:by:)`` and,
+    /// importantly, the same rules: each line merges with a matching pending
+    /// item rather than producing a second row, and each gets its aisle guessed
+    /// from its name. A screen that parsed the text itself and then called the
+    /// single-item command per line would work, and would be one refactor away
+    /// from quietly not doing either.
+    ///
+    /// Quantities from the paste are added to what is already on the list,
+    /// unlike the meal plan's ingredients, which are skipped when the item is
+    /// already there. The difference is what the number means: a person who
+    /// typed "2 milk" while the list says milk has counted something, whereas
+    /// three recipes mentioning milk have not.
+    ///
+    /// - Parameters:
+    ///   - text: What was pasted or typed.
+    ///   - listID: The list to add to.
+    ///   - householdID: The household the list belongs to.
+    ///   - memberID: Who is adding it.
+    /// - Returns: The items as they now stand, whether created or merged, in
+    ///   the order the text first mentions them. Empty when the text held
+    ///   nothing to buy.
+    /// - Throws: ``DomainError/notFound(entity:id:)`` when there is no such
+    ///   list, or ``DomainError/notPermitted(action:role:)``.
+    @discardableResult
+    public func addShoppingItems(
+        from text: String,
+        to listID: Identifier<ShoppingList>,
+        in householdID: Identifier<Household>,
+        by memberID: Identifier<Member>
+    ) async throws -> [ShoppingItem] {
+        let snapshot = try await store.snapshot(of: householdID)
+        let member = try snapshot.requireActiveMember(memberID)
+        try Permissions.check(.manageShoppingList, for: member.role)
+
+        guard snapshot.shoppingLists.contains(where: { $0.id == listID }) else {
+            throw DomainError.notFound(entity: "List", id: listID.description)
+        }
+
+        // Read once against the snapshot loaded at the top, then updated as the
+        // paste is worked through. Reloading per line would be twenty snapshots
+        // for one paste, and trusting the snapshot throughout would mean each
+        // line merging only against rows that existed before the paste began.
+        // The parser already collapses repeats using the same folding the list
+        // does, so today nothing reaches here that needs the second half of
+        // that — which is precisely why it is written down: the day the two
+        // foldings drift apart, this stays correct.
+        var pending = snapshot.items(on: listID)
+        var saved: [ShoppingItem] = []
+
+        for draft in ShoppingListParser.drafts(from: text) {
+            if let existing = pending.pendingMatch(for: draft.name) {
+                let merged = existing.incremented(by: draft.quantity)
+                try await store.save(merged)
+                pending.removeAll { $0.id == merged.id }
+                pending.append(merged)
+                saved.append(merged)
+                continue
+            }
+
+            let item = try ShoppingItem(
+                listID: listID,
+                householdID: householdID,
+                name: draft.name,
+                quantity: draft.quantity,
+                unit: draft.unit,
+                category: draft.category,
+                addedBy: memberID,
+                addedAt: dateProvider.now
+            )
+            try await store.save(item)
+            pending.append(item)
+            saved.append(item)
+        }
+        return saved
+    }
+
     /// Edits an item, leaving anything not named alone.
     ///
     /// One command rather than five, for the same reason ``updateChore(_:in:by:title:notes:assignment:points:startingOn:recurrence:category:)``
