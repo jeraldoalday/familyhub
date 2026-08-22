@@ -171,7 +171,12 @@ public struct StreakCalculator: Sendable {
                 continue
             }
             run += 1
-            if run > best {
+            // Greater *or equal*, so that when a later run ties the record it
+            // takes the record's last day with it. Strictly-greater leaves
+            // `bestLastDay` on the older run while the live check below can
+            // still say the record is going — a screen reading "best: 3 days,
+            // last on 4 March" beside a run that counted this morning.
+            if run >= best {
                 best = run
                 bestLastDay = occurrence
             }

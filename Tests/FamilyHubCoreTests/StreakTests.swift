@@ -215,6 +215,24 @@ struct StreakTests {
         #expect(longest.isLive)
     }
 
+    @Test("A later run that ties the record takes the record's last day")
+    func longestStreakPrefersTheLaterOfTwoEqualRuns() throws {
+        let chore = try makeChore()
+        // Three days done, a miss, a day done, a miss, then three done ending
+        // today — two runs of three, the second of them still going.
+        let done = [0, 1, 2, 4, 6, 7, 8].map { completion(of: chore, on: $0) }
+        let longest = calculator(chores: [chore], completions: done)
+            .longestStreak(for: chore, upTo: day(8))
+
+        #expect(longest.length == 3)
+        #expect(longest.isLive)
+        // The run being described is the one that is still going, so the day it
+        // last counted is today — not a fortnight ago, which is what a record
+        // that only moves on a strictly longer run would report while calling
+        // itself live.
+        #expect(longest.lastDay == day(8))
+    }
+
     @Test("A chore nobody has ever finished has no record, live or otherwise")
     func longestStreakOfNothingIsNotLive() throws {
         let chore = try makeChore()
