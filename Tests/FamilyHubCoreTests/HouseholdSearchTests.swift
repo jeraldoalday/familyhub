@@ -232,6 +232,38 @@ struct HouseholdSearchTests {
         #expect(f.snapshot.search.results(for: "swimming    lesson").count == 1)
     }
 
+    @Test("The shortcut for one-word queries agrees with the long way round")
+    func fastPathAgreesWithFolding() {
+        // A query with no space is answered without building a folded copy of
+        // the text, which is sound only because collapsing whitespace can
+        // neither create nor destroy a match that contains none. This is the
+        // test that says so out loud, including for the names where it is
+        // least obvious.
+        let names = [
+            "Swimming lesson", "Bánh mì", "  Bánh   mì  ", "GRAPEFRUIT",
+            "Tidy  your   room", "Crème fraîche", "école", "no match here",
+        ]
+        let queries = ["swimming", "banh", "mi", "grapefruit", "room", "creme", "ecole", "zzz"]
+
+        for name in names {
+            for query in queries {
+                let needle = HouseholdSearch.fold(query)
+                let theLongWay = HouseholdSearch.fold(name).contains(needle)
+                let matched = HouseholdSearch.match(needle, in: name) != nil
+                #expect(matched == theLongWay, "\(query) in \(name)")
+            }
+        }
+    }
+
+    @Test("A multi-word query still finds a name typed with extra spaces")
+    func multiWordQueriesTakeTheLongWay() {
+        // The shortcut deliberately does not apply here: "tidy your room" has
+        // to find a record somebody typed with two spaces in it.
+        let needle = HouseholdSearch.fold("tidy your room")
+        #expect(HouseholdSearch.match(needle, in: "Tidy  your   room") == .exact)
+        #expect(HouseholdSearch.match(needle, in: "Please tidy  your room") == .contains)
+    }
+
     // MARK: What is left out
 
     @Test("A single character is not a query")

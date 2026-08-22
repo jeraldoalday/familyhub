@@ -333,6 +333,43 @@ struct HotPathTests {
         }
     }
 
+    // MARK: Search
+
+    @Test("Searching the whole household stays fast on two years of everything")
+    func searchIsFastOnALargeHousehold() throws {
+        // Every keystroke re-runs this. A search box is the one screen where a
+        // hundred milliseconds is visible as the field lagging behind the
+        // person typing into it, so what is guarded here is that matching never
+        // starts expanding a schedule: a chore's summary is a phrase, and
+        // asking twenty chores with two years of history what days they fall on
+        // to decide whether their titles match would be exactly that mistake.
+        let busy = try withCalendar(try withMealPlan(try makeBusyHousehold()))
+        var found = 0
+
+        let elapsed = duration {
+            found = busy.snapshot.search.results(for: "commitment").count
+        }
+
+        #expect(found > 0)
+        #expect(elapsed < 1.0)
+    }
+
+    @Test("A query matching almost everything still returns only what was asked for")
+    func searchLimitBoundsTheAnswer() throws {
+        // The limit has to bound the work the caller does with the answer, not
+        // only the answer: a query matching a thousand records must not hand
+        // back a thousand rows for a list showing eight.
+        let busy = try withCalendar(try withMealPlan(try makeBusyHousehold()))
+        var results: [HouseholdSearch.Result] = []
+
+        let elapsed = duration {
+            results = busy.snapshot.search.results(for: "meal", limit: 10)
+        }
+
+        #expect(results.count == 10)
+        #expect(elapsed < 1.0)
+    }
+
     // MARK: The calendar
 
     @Test("A week of the calendar stays fast on two years of commitments")

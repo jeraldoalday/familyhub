@@ -131,7 +131,11 @@ public struct HouseholdSearch: Sendable {
 
         /// A stable identity across searches, so a results list animates
         /// rather than rebuilding.
-        public var id: String {
+        public var id: String { Result.identity(of: subject) }
+
+        /// The identity a subject produces, shared with the ordering so that a
+        /// result and the hit it came from cannot break the tie differently.
+        static func identity(of subject: Subject) -> String {
             switch subject {
             case .member(let value): "member:\(value.id)"
             case .chore(let value): "chore:\(value.id)"
@@ -176,19 +180,24 @@ public struct HouseholdSearch: Sendable {
         let needle = HouseholdSearch.fold(query)
         guard needle.count >= HouseholdSearch.minimumQueryLength, limit > 0 else { return [] }
 
-        var results: [Result] = []
-        results.reserveCapacity(limit)
+        // Matching and describing are two passes on purpose. A hit is cheap —
+        // a folded comparison against a name the record already holds — while
+        // the second line of a row is assembled: a schedule rendered as a
+        // phrase, an event's participants resolved against the member list. A
+        // query like "meal" on a household two years into the meal planner
+        // matches thousands of records to show eight of them, and describing
+        // the other thousands is work thrown away between keystrokes.
+        var hits: [Hit] = []
 
         for member in snapshot.members where scope == .everything || member.isActive {
             guard let strength = HouseholdSearch.match(needle, in: member.name.value) else {
                 continue
             }
-            results.append(
-                Result(
+            hits.append(
+                Hit(
                     subject: .member(member),
                     strength: strength,
                     title: member.name.value,
-                    detail: member.role.label,
                     isRetired: !member.isActive
                 )
             )
@@ -200,12 +209,11 @@ public struct HouseholdSearch: Sendable {
                     needle, in: chore.title.value, alsoIn: [chore.notes?.value]
                 )
             else { continue }
-            results.append(
-                Result(
+            hits.append(
+                Hit(
                     subject: .chore(chore),
                     strength: strength,
                     title: chore.title.value,
-                    detail: snapshot.scheduleSummary(of: chore),
                     isRetired: !chore.isActive
                 )
             )
@@ -219,12 +227,11 @@ public struct HouseholdSearch: Sendable {
                     alsoIn: [event.notes?.value, event.location?.value]
                 )
             else { continue }
-            results.append(
-                Result(
+            hits.append(
+                Hit(
                     subject: .event(event),
                     strength: strength,
                     title: event.title.value,
-                    detail: event.summary(members: snapshot.members),
                     isRetired: !event.isActive
                 )
             )
@@ -239,15 +246,14 @@ public struct HouseholdSearch: Sendable {
                 let strength = HouseholdSearch.match(
                     needle,
                     in: meal.title.value,
-                    alsoIn: meal.ingredientNames.map { $0 } + [meal.notes?.value]
+                    alsoIn: meal.ingredientNames + [meal.notes?.value]
                 )
             else { continue }
-            results.append(
-                Result(
+            hits.append(
+                Hit(
                     subject: .meal(meal),
                     strength: strength,
                     title: meal.title.value,
-                    detail: meal.summary,
                     isRetired: false
                 )
             )
@@ -257,12 +263,11 @@ public struct HouseholdSearch: Sendable {
             guard let strength = HouseholdSearch.match(needle, in: reward.name.value) else {
                 continue
             }
-            results.append(
-                Result(
+            hits.append(
+                Hit(
                     subject: .reward(reward),
                     strength: strength,
                     title: reward.name.value,
-                    detail: "\(reward.cost) points",
                     isRetired: !reward.isActive
                 )
             )
@@ -274,18 +279,29 @@ public struct HouseholdSearch: Sendable {
                     needle, in: item.name.value, alsoIn: [item.note?.value]
                 )
             else { continue }
-            results.append(
-                Result(
+            hits.append(
+                Hit(
                     subject: .shoppingItem(item),
                     strength: strength,
                     title: item.name.value,
-                    detail: item.category.label,
                     isRetired: !item.isPending
                 )
             )
         }
 
-        return Array(results.sorted(by: HouseholdSearch.order).prefix(limit))
+        return
+            hits
+            .sorted(by: HouseholdSearch.order)
+            .prefix(limit)
+            .map { hit in
+                Result(
+                    subject: hit.subject,
+                    strength: hit.strength,
+                    title: hit.title,
+                    detail: detail(for: hit.subject),
+                    isRetired: hit.isRetired
+                )
+            }
     }
 
     /// The results grouped into the sections a results screen shows, in kind
@@ -326,17 +342,49 @@ public struct HouseholdSearch: Sendable {
         in name: String,
         alsoIn secondary: [String?] = []
     ) -> Strength? {
+        if let strength = strength(of: needle, in: name) { return strength }
+        for text in secondary.compactMap({ $0 }) where appears(needle, in: text) {
+            return .contains
+        }
+        return nil
+    }
+
+    /// How strongly `needle` matches a record's own name.
+    ///
+    /// The folded copy is built only once something is known to match, because
+    /// the overwhelmingly common answer on any given record is "it does not"
+    /// and folding every name in a household to discover that is what makes a
+    /// search box lag behind the person typing into it.
+    private static func strength(of needle: String, in name: String) -> Strength? {
+        guard appears(needle, in: name) else { return nil }
         let folded = fold(name)
         if folded == needle { return .exact }
         if folded.hasPrefix(needle) { return .prefix }
         if folded.split(separator: " ").contains(where: { $0.hasPrefix(needle) }) {
             return .wordPrefix
         }
-        if folded.contains(needle) { return .contains }
-        for text in secondary.compactMap({ $0 }) where fold(text).contains(needle) {
-            return .contains
+        return .contains
+    }
+
+    /// Whether `needle` appears anywhere in `text`, comparing the way
+    /// ``fold(_:)`` would.
+    ///
+    /// A query with no space in it can be answered by `range(of:options:)`
+    /// directly, which compares in place instead of building a folded copy of
+    /// the text — an order of magnitude cheaper, and it is the answer for
+    /// nearly every record scanned. That shortcut is sound rather than
+    /// approximate: the only thing folding does beyond case and accents is
+    /// collapse runs of whitespace, which can neither create nor destroy a
+    /// match that contains no whitespace of its own.
+    ///
+    /// A multi-word query does not get the shortcut, because "swimming lesson"
+    /// has to find a record whose name was typed with two spaces in it.
+    private static func appears(_ needle: String, in text: String) -> Bool {
+        guard needle.contains(" ") else {
+            return text.range(of: needle, options: [.caseInsensitive, .diacriticInsensitive])
+                != nil
         }
-        return nil
+        return fold(text).contains(needle)
     }
 
     /// The comparable form of a piece of text: folded for case and accents,
@@ -349,6 +397,39 @@ public struct HouseholdSearch: Sendable {
             .joined(separator: " ")
     }
 
+    /// A match before it has been described.
+    ///
+    /// Everything the ordering needs and nothing that costs anything to
+    /// produce, so that the records the limit is about to discard are never
+    /// described at all.
+    private struct Hit {
+        let subject: Subject
+        let strength: Strength
+        let title: String
+        let isRetired: Bool
+
+        var kind: Kind { subject.kind }
+
+        /// The same stable identity a ``Result`` reports, used as the final
+        /// tiebreak in the ordering.
+        var identity: String { Result.identity(of: subject) }
+    }
+
+    /// The second line of a row.
+    ///
+    /// Assembled only for the results that survive the limit. Every case here
+    /// builds a string, and two of them walk a collection to do it.
+    private func detail(for subject: Subject) -> String? {
+        switch subject {
+        case .member(let member): member.role.label
+        case .chore(let chore): snapshot.scheduleSummary(of: chore)
+        case .event(let event): event.summary(members: snapshot.members)
+        case .meal(let meal): meal.summary
+        case .reward(let reward): "\(reward.cost) points"
+        case .shoppingItem(let item): item.category.label
+        }
+    }
+
     /// The order results are shown in: strongest match, then kind, then live
     /// records before retired ones, then alphabetically, then by identity.
     ///
@@ -356,13 +437,13 @@ public struct HouseholdSearch: Sendable {
     /// title — households really do have "Tidy your room" once per child — and
     /// without a final tiebreak the pair swap places between reads of the same
     /// query, which reads as the list flickering.
-    private static func order(_ lhs: Result, _ rhs: Result) -> Bool {
+    private static func order(_ lhs: Hit, _ rhs: Hit) -> Bool {
         if lhs.strength != rhs.strength { return lhs.strength < rhs.strength }
         if lhs.kind != rhs.kind { return lhs.kind < rhs.kind }
         if lhs.isRetired != rhs.isRetired { return !lhs.isRetired }
         let comparison = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
         if comparison != .orderedSame { return comparison == .orderedAscending }
-        return lhs.id < rhs.id
+        return lhs.identity < rhs.identity
     }
 }
 
