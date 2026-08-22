@@ -5,10 +5,10 @@ Two weeks, from a tested domain core to something submittable to App Review.
 ## Where things stand
 
 **Day 1 is done, and then some.** The domain and store layers are complete and
-tested: 653 tests covering recurrence, chore rotation, permissions, the points
+tested: 674 tests covering recurrence, chore rotation, permissions, the points
 ledger, shopping lists, streaks, the weekly recap, workload fairness, reminder
-planning, meal planning, the family calendar, the command layer, the change
-feed, and the backup format. `make check` builds, tests, and lints in a few
+planning, meal planning, the family calendar, household-wide search, the
+command layer, the change feed, and the backup format. `make check` builds, tests, and lints in a few
 seconds.
 
 Some of that was pulled forward out of later days on purpose. Streaks,

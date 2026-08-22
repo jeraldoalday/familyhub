@@ -27,7 +27,7 @@ and then it stops being faster, for three specific reasons.
 **Testability.** Every rule in this app is about time — recurrence, streaks,
 overdue states, cooldowns. Rules that live on a `@Model` need a container to
 test, which means tests that take seconds instead of microseconds, which in
-practice means tests that do not get written. The 653 tests here run in under
+practice means tests that do not get written. The 674 tests here run in under
 half a second because none of them touch a database.
 
 **Replaceability.** Local-only storage today, iCloud sync later. With rules in
@@ -148,6 +148,14 @@ aisle is read. `guess(for:)` and `inferred(from:fallback:)` are separate
 because "we do not know" and "we think this is miscellaneous" are different
 answers, and collapsing them is how a guess overwrites a choice somebody made
 by hand.
+
+**Parsing produces drafts, not records.** `ShoppingListParser` reads a pasted
+list and hands back values with no household, no list, and no author, so
+nothing is written until a screen has shown the family what was made of what
+they wrote. It splits on newlines and semicolons and deliberately not on
+commas, because "Onion, red" is how people write one item and splitting it
+produces two rows that are each wrong. The same shape as `ChoreTemplate`, for
+the same reason: a guess that writes itself cannot be reviewed before it does.
 
 **Conflict resolution** lives in
 `Collection<ChoreCompletion>.deduplicatedByOccurrence()` and, in the same shape,

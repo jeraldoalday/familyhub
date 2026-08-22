@@ -46,7 +46,7 @@ The domain and store layers build and test with nothing but the Swift toolchain:
 
 ```bash
 make check      # build + test + lint + release build — the pre-commit gate
-make test       # 653 tests
+make test       # 674 tests
 make format     # reformat in place
 make lint       # the exact formatting check CI runs
 make release    # the optimised build CI also runs
@@ -94,7 +94,8 @@ Sources/
                        lists, planned meals, calendar events, chore packs
     Scheduling/        Recurrence engine, weekdays, reminder planning
     Rules/             Permissions, points ledger, streaks, insights, meal
-                       plan, family calendar, search, aisle guessing
+                       plan, family calendar, search, aisle guessing,
+                       pasted-list parsing
     Support/           Identifiers, validation, errors, the injected clock
   FamilyHubStore/      Store contract, in-memory store, commands, change feed,
                        backup format, demo data
@@ -118,6 +119,7 @@ docs/
 | Shopping lists with aisle grouping | ✅ complete, tested |
 | Working out an item's aisle from its name | ✅ complete, tested |
 | Search across chores, people, meals, lists, and the calendar | ✅ complete, tested |
+| Adding a whole shopping list by pasting it | ✅ complete, tested |
 | Starter chore packs for a household's first day | ✅ complete, tested |
 | Meal planning, cooking rota, and the shopping it implies | ✅ complete, tested |
 | Family calendar, recurring events, and clash detection | ✅ complete, tested |
