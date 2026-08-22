@@ -633,6 +633,34 @@ struct HouseholdCommandsTests {
         #expect(merged.quantity == 3)
     }
 
+    @Test("An item added without an aisle is filed by its name")
+    func addedItemsAreCategorised() async throws {
+        // Type "milk", press return. Asking the person adding a thing at half
+        // past seven to also pick from a ten-item menu is how a list ends up
+        // entirely in Other, which is the same list with an extra tap.
+        let f = try await makeFixture()
+        let milk = try await f.commands.addShoppingItem(
+            "Milk", to: f.list.id, in: f.household.id, by: f.parent.id
+        )
+        let mystery = try await f.commands.addShoppingItem(
+            "Present for Gran", to: f.list.id, in: f.household.id, by: f.parent.id
+        )
+
+        #expect(milk.category == .dairy)
+        #expect(mystery.category == .other)
+    }
+
+    @Test("An aisle chosen by hand is never overruled by the guess")
+    func explicitCategoryWins() async throws {
+        // Somebody who says where a thing goes has said where it goes. A
+        // lexicon overruling them is worse than a lexicon that stays quiet.
+        let f = try await makeFixture()
+        let item = try await f.commands.addShoppingItem(
+            "Milk", category: .frozen, to: f.list.id, in: f.household.id, by: f.parent.id
+        )
+        #expect(item.category == .frozen)
+    }
+
     @Test("A purchased item does not absorb a newly added one")
     func purchasedItemsDoNotAbsorb() async throws {
         // Milk bought last week must not silently swallow this week's milk.

@@ -294,6 +294,47 @@ struct MealCommandTests {
         #expect(snapshot.items(on: f.list.id).count == 3)
     }
 
+    @Test("A generated shopping list arrives sorted into aisles")
+    func generatedIngredientsAreCategorised() async throws {
+        // The list nobody typed is the one that would otherwise arrive entirely
+        // in "Other" — twenty unsorted lines being exactly what the aisle
+        // grouping exists to prevent.
+        let f = try await makeFixture()
+        try await f.commands.planMeal(
+            in: f.household.id, on: day(1), slot: .dinner, title: "Chilli",
+            ingredients: ["Beef mince", "Tinned tomatoes", "Sourdough", "Cheddar"],
+            by: f.owner.id
+        )
+
+        let added = try await f.commands.addMealIngredients(
+            from: clock.today, to: day(6), in: f.household.id,
+            toList: f.list.id, by: f.owner.id
+        )
+
+        let aisles = Dictionary(
+            uniqueKeysWithValues: added.map { ($0.name.value, $0.category) }
+        )
+        #expect(aisles["Beef mince"] == .meat)
+        #expect(aisles["Tinned tomatoes"] == .produce)
+        #expect(aisles["Sourdough"] == .bakery)
+        #expect(aisles["Cheddar"] == .dairy)
+    }
+
+    @Test("An ingredient nothing recognises stays in Other")
+    func unrecognisedIngredientsStayInOther() async throws {
+        let f = try await makeFixture()
+        try await f.commands.planMeal(
+            in: f.household.id, on: day(1), slot: .dinner, title: "Sam's invention",
+            ingredients: ["Whatever Sam wants"], by: f.owner.id
+        )
+
+        let added = try await f.commands.addMealIngredients(
+            from: clock.today, to: day(6), in: f.household.id,
+            toList: f.list.id, by: f.owner.id
+        )
+        #expect(added.first?.category == .other)
+    }
+
     @Test("Running the same week twice does not double the list")
     func ingredientsAreNotAddedTwice() async throws {
         let f = try await makeFixture()

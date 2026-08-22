@@ -567,7 +567,9 @@ public struct HouseholdCommands: Sendable {
     /// - Parameters:
     ///   - name: What to buy.
     ///   - quantity: How many.
-    ///   - category: Which aisle it belongs to.
+    ///   - category: Which aisle it belongs to. Worked out from the name when
+    ///     it is not given, so the fast path — type "milk", press return —
+    ///     still produces a list that groups.
     ///   - listID: The list to add it to.
     ///   - householdID: The household the list belongs to.
     ///   - memberID: Who is adding it.
@@ -579,7 +581,7 @@ public struct HouseholdCommands: Sendable {
     public func addShoppingItem(
         _ name: String,
         quantity: Int = 1,
-        category: ShoppingItem.Category = .other,
+        category: ShoppingItem.Category? = nil,
         to listID: Identifier<ShoppingList>,
         in householdID: Identifier<Household>,
         by memberID: Identifier<Member>
@@ -612,7 +614,11 @@ public struct HouseholdCommands: Sendable {
             householdID: householdID,
             name: name,
             quantity: quantity,
-            category: category,
+            // An explicit choice always wins. The guess only fills the silence,
+            // because a caller that passed `.other` on purpose has said where
+            // the item goes and being overruled by a lexicon is worse than
+            // being unhelpful.
+            category: category ?? ShoppingItem.Category.inferred(from: name),
             addedBy: memberID,
             addedAt: dateProvider.now
         )
@@ -998,6 +1004,11 @@ public struct HouseholdCommands: Sendable {
     /// because three meals mention it is worse than leaving the one somebody
     /// already added alone.
     ///
+    /// Each ingredient is filed into an aisle on the way in. This is the list
+    /// nobody typed, so it is the one that arrives entirely in "Other" if
+    /// nothing guesses — twenty unsorted lines being exactly what the aisle
+    /// grouping exists to prevent.
+    ///
     /// - Returns: The items added, in the order the plan first mentions them.
     @discardableResult
     public func addMealIngredients(
@@ -1032,6 +1043,7 @@ public struct HouseholdCommands: Sendable {
                 listID: listID,
                 householdID: householdID,
                 name: ingredient.name,
+                category: ShoppingItem.Category.inferred(from: ingredient.name),
                 addedBy: actorID,
                 addedAt: dateProvider.now
             )
