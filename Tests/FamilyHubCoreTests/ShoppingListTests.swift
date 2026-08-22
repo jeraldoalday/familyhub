@@ -63,6 +63,60 @@ struct ShoppingListTests {
         #expect(try item("Apples", quantity: 6).quantityDescription == "6")
     }
 
+    // MARK: Editing an item
+
+    @Test("An item can be renamed, and the new name is validated too")
+    func renamingAnItem() throws {
+        let renamed = try item("Milk").renamed(to: "  Oat milk  ")
+        #expect(renamed.name.value == "Oat milk")
+
+        #expect(throws: DomainError.blank(field: .itemName)) {
+            _ = try item("Milk").renamed(to: "   ")
+        }
+    }
+
+    @Test("A unit is trimmed on the way in and cleared by blanking it")
+    func changingTheUnit() throws {
+        let original = try item("Flour", unit: "kg")
+        #expect(original.withUnit("  bags ").unit == "bags")
+        #expect(original.withUnit("   ").unit == nil)
+        #expect(original.withUnit(nil).unit == nil)
+    }
+
+    @Test("A note can be added, changed, and cleared")
+    func changingTheNote() throws {
+        let original = try item("Milk")
+        #expect(original.note == nil)
+
+        let noted = try original.withNote("  the oat one, not the almond  ")
+        #expect(noted.note?.value == "the oat one, not the almond")
+        #expect(try noted.withNote(nil).note == nil)
+        #expect(try noted.withNote("  ").note == nil)
+    }
+
+    @Test("Editing an item leaves everything it did not touch alone")
+    func editsAreNarrow() throws {
+        // The mutators return copies, so the one field being changed must not
+        // quietly reset the purchase, the identifier, or who added it.
+        let original = try item("Milk", quantity: 2, unit: "bottles", category: .dairy)
+        let edited = try original.renamed(to: "Oat milk").withUnit("cartons")
+
+        #expect(edited.id == original.id)
+        #expect(edited.quantity == 2)
+        #expect(edited.category == .dairy)
+        #expect(edited.addedBy == original.addedBy)
+        #expect(edited.addedAt == original.addedAt)
+        #expect(edited.isPending)
+    }
+
+    @Test("Renaming an item changes what counts as a duplicate of it")
+    func renamingChangesTheDuplicateKey() throws {
+        let renamed = try item("Milk").renamed(to: "Oat milk")
+        #expect(renamed.duplicateKey == "oat milk")
+        #expect([renamed].pendingMatch(for: "milk") == nil)
+        #expect([renamed].pendingMatch(for: "OAT MILK")?.id == renamed.id)
+    }
+
     // MARK: Duplicates
 
     @Test("Duplicate detection ignores case, accents, and padding")

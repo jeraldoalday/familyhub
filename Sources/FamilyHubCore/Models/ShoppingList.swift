@@ -156,13 +156,22 @@ public struct ShoppingItem: Entity {
         self.householdID = householdID
         self.name = try ValidatedText(name, field: .itemName, limit: Limits.choreTitleLength)
         self.quantity = try quantity.validated(in: Limits.itemQuantity, field: .quantity)
-        let trimmedUnit = unit?.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.unit = (trimmedUnit?.isEmpty ?? true) ? nil : trimmedUnit
+        self.unit = ShoppingItem.normalizedUnit(unit)
         self.category = category
         self.note = try ValidatedText.optional(note, field: .choreNotes, limit: Limits.notesLength)
         self.addedBy = addedBy
         self.addedAt = addedAt
         self.purchase = purchase
+    }
+
+    /// A unit trimmed, or `nil` when there is nothing left of it.
+    ///
+    /// A free-text field rather than an enumeration, because the units a
+    /// household writes are "bottles", "bunches", and "the big ones" — and one
+    /// place doing the trimming is what stops "kg" and "kg " being two units.
+    static func normalizedUnit(_ raw: String?) -> String? {
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (trimmed?.isEmpty ?? true) ? nil : trimmed
     }
 
     /// Who bought an item and when.
@@ -271,6 +280,34 @@ extension ShoppingItem {
     public func withQuantity(_ newQuantity: Int) throws -> ShoppingItem {
         var copy = self
         copy.quantity = try newQuantity.validated(in: Limits.itemQuantity, field: .quantity)
+        return copy
+    }
+
+    /// Returns a copy called something else.
+    ///
+    /// - Throws: ``DomainError/blank(field:)`` or
+    ///   ``DomainError/tooLong(field:limit:)``.
+    public func renamed(to newName: String) throws -> ShoppingItem {
+        var copy = self
+        copy.name = try ValidatedText(newName, field: .itemName, limit: Limits.choreTitleLength)
+        return copy
+    }
+
+    /// Returns a copy measured in a different unit, or in none.
+    public func withUnit(_ newUnit: String?) -> ShoppingItem {
+        var copy = self
+        copy.unit = ShoppingItem.normalizedUnit(newUnit)
+        return copy
+    }
+
+    /// Returns a copy with a different note, or none.
+    ///
+    /// - Throws: ``DomainError/tooLong(field:limit:)``.
+    public func withNote(_ newNote: String?) throws -> ShoppingItem {
+        var copy = self
+        copy.note = try ValidatedText.optional(
+            newNote, field: .choreNotes, limit: Limits.notesLength
+        )
         return copy
     }
 
