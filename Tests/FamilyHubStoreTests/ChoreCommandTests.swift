@@ -68,6 +68,128 @@ struct ChoreCommandTests {
         )
     }
 
+    // MARK: Starter packs
+
+    @Test("Installing a pack creates its chores, unassigned and starting today")
+    func installPackCreatesChores() async throws {
+        let f = try await makeFixture()
+        let created = try await f.commands.installChorePack(
+            .everyday, in: f.household.id, by: f.owner.id
+        )
+
+        #expect(created.count == ChorePack.everyday.templates.count)
+        #expect(created.map(\.title.value) == ChorePack.everyday.templates.map(\.title))
+        #expect(created.allSatisfy { $0.startDate == clock.today })
+        #expect(created.allSatisfy { $0.createdBy == f.owner.id })
+        // Choosing the rota is a decision about a particular family that a
+        // catalogue cannot make, and a guessed one is unpicked before Monday.
+        #expect(created.allSatisfy { $0.assignment == .anyone })
+
+        let snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.chores.count == created.count)
+    }
+
+    @Test("A chore the household already has is skipped, not refused")
+    func installPackSkipsDuplicates() async throws {
+        // A pack is an offer. A family that has already written down half of
+        // it should get the other half rather than an error telling them to go
+        // and find which one clashed.
+        let f = try await makeFixture()
+        try await f.commands.createChore(
+            in: f.household.id, title: "  make your BED  ", by: f.owner.id
+        )
+
+        let created = try await f.commands.installChorePack(
+            .everyday, in: f.household.id, by: f.owner.id
+        )
+
+        #expect(created.count == ChorePack.everyday.templates.count - 1)
+        #expect(!created.contains { $0.title.value == "Make your bed" })
+
+        let snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.chores.filter { $0.title.searchKey == "make your bed" }.count == 1)
+    }
+
+    @Test("Installing the same pack twice adds nothing the second time")
+    func installPackIsIdempotent() async throws {
+        let f = try await makeFixture()
+        try await f.commands.installChorePack(.pets, in: f.household.id, by: f.owner.id)
+        let second = try await f.commands.installChorePack(
+            .pets, in: f.household.id, by: f.owner.id
+        )
+
+        #expect(second.isEmpty)
+        let snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.chores.count == ChorePack.pets.templates.count)
+    }
+
+    @Test("A chore the household archived is not handed back as new")
+    func installPackRespectsTheArchive() async throws {
+        // Archiving is a decision about that chore. Offering it again as new
+        // overrules it — the archive is where they put it, not a bin the app
+        // may empty.
+        let f = try await makeFixture()
+        let installed = try await f.commands.installChorePack(
+            .pets, in: f.household.id, by: f.owner.id
+        )
+        let walk = try #require(installed.first { $0.title.value == "Walk the dog" })
+        try await f.commands.archiveChore(walk.id, in: f.household.id, by: f.owner.id)
+
+        let again = try await f.commands.installChorePack(
+            .pets, in: f.household.id, by: f.owner.id
+        )
+        #expect(again.isEmpty)
+    }
+
+    @Test("A household of small children is not given a teenager's chores")
+    func installPackFiltersByRole() async throws {
+        let f = try await makeFixture()
+        try await f.commands.removeMember(f.teen.id, from: f.household.id, by: f.owner.id)
+        // Only the child and the adults remain, and the adults can do anything,
+        // so the filter has to look at the most capable member rather than at
+        // every member.
+        let withAdults = try await f.commands.installChorePack(
+            .kitchen, in: f.household.id, by: f.owner.id
+        )
+        #expect(withAdults.count == ChorePack.kitchen.templates.count)
+    }
+
+    @Test("A pack starts on the day it is told to")
+    func installPackHonoursTheStartDate() async throws {
+        let f = try await makeFixture()
+        let monday = calendar.date(byAdding: .day, value: 7, to: clock.today) ?? clock.today
+        let created = try await f.commands.installChorePack(
+            .everyday, in: f.household.id, startingOn: monday.addingTimeInterval(60 * 60 * 15),
+            by: f.owner.id
+        )
+        // Normalised, like every other start date: a chore belongs to a day.
+        #expect(created.allSatisfy { $0.startDate == monday })
+    }
+
+    @Test("A child cannot install a pack")
+    func installPackNeedsPermission() async throws {
+        let f = try await makeFixture()
+        await #expect(
+            throws: DomainError.notPermitted(action: .createChore, role: .child)
+        ) {
+            try await f.commands.installChorePack(
+                .everyday, in: f.household.id, by: f.child.id
+            )
+        }
+    }
+
+    @Test("A member who has left cannot install a pack")
+    func installPackNeedsAnActiveMember() async throws {
+        let f = try await makeFixture()
+        try await f.commands.removeMember(f.adult.id, from: f.household.id, by: f.owner.id)
+
+        await #expect(throws: DomainError.memberNotInHousehold(f.adult.id)) {
+            try await f.commands.installChorePack(
+                .everyday, in: f.household.id, by: f.adult.id
+            )
+        }
+    }
+
     // MARK: Creating chores
 
     @Test("Creating a chore records who made it and normalises its start")

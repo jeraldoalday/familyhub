@@ -195,6 +195,83 @@ public struct HouseholdCommands: Sendable {
         return chore
     }
 
+    /// Adds a pack of ready-made chores to a household.
+    ///
+    /// The command behind the "pick your first chores" step of onboarding, and
+    /// behind the "add more" button that step leaves behind. It exists rather
+    /// than the screen calling ``createChore(in:title:notes:assignment:points:startingOn:recurrence:category:by:)``
+    /// in a loop for the reason every command here exists: the loop version has
+    /// to decide what to do about a chore the household already has, and two
+    /// screens deciding that differently is how a family ends up with "Bins"
+    /// twice.
+    ///
+    /// Chores the household already has, by name, are skipped rather than
+    /// refused. A pack is an offer, and a family that has already written down
+    /// half of it should get the other half rather than an error telling them
+    /// to go and find which one clashed.
+    ///
+    /// Everything installed is left unassigned. Choosing the rota is a decision
+    /// about a particular family that a catalogue cannot make, and guessing it
+    /// — round-robin over whoever happens to be in the household — produces a
+    /// rota a parent has to unpick before the first Monday.
+    ///
+    /// - Parameters:
+    ///   - pack: The pack to install.
+    ///   - householdID: The household to add it to.
+    ///   - startDate: The first day the chores can occur. Today by default.
+    ///   - actorID: Who is installing it.
+    /// - Returns: The chores created, in the pack's own order. Empty when the
+    ///   household already had all of them.
+    /// - Throws: ``DomainError/notPermitted(action:role:)`` when the actor may
+    ///   not create chores.
+    @discardableResult
+    public func installChorePack(
+        _ pack: ChorePack,
+        in householdID: Identifier<Household>,
+        startingOn startDate: Date? = nil,
+        by actorID: Identifier<Member>
+    ) async throws -> [Chore] {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireActiveMember(actorID)
+        try Permissions.check(.createChore, for: actor.role)
+
+        // Measured against archived chores too. A household that retired
+        // "Hoover downstairs" in March decided something about that chore, and
+        // handing it back as new the next time they open a pack overrules them
+        // — the archive is where they put it, not a bin the app may empty.
+        let existing = Set(
+            snapshot.chores.map { chore in
+                chore.title.value
+                    .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            }
+        )
+
+        // Filtered by who is actually in the household, so a house of small
+        // children is not handed "Take the bins out" as a starting point.
+        let roles = snapshot.activeMembers.map(\.role)
+        let calendar = snapshot.household.calendar()
+        let day = calendar.startOfDay(for: startDate ?? dateProvider.now)
+
+        var created: [Chore] = []
+        for template in pack.templates(for: roles) {
+            guard !existing.contains(template.duplicateKey) else { continue }
+            let chore = try Chore(
+                householdID: householdID,
+                title: template.title,
+                notes: template.notes,
+                points: template.points,
+                startDate: day,
+                recurrence: template.recurrence,
+                category: template.category,
+                createdBy: actorID,
+                createdAt: dateProvider.now
+            )
+            try await store.save(chore)
+            created.append(chore)
+        }
+        return created
+    }
+
     /// Edits a chore, leaving anything not named alone.
     ///
     /// One command rather than six, because a chore editor saves every field at
