@@ -661,6 +661,126 @@ struct HouseholdCommandsTests {
         #expect(item.category == .frozen)
     }
 
+    @Test("Editing an item changes only the fields it was given")
+    func editingAnItemIsNarrow() async throws {
+        let f = try await makeFixture()
+        let original = try await f.commands.addShoppingItem(
+            "Milk", quantity: 2, to: f.list.id, in: f.household.id, by: f.parent.id
+        )
+
+        let edited = try await f.commands.updateShoppingItem(
+            original.id, in: f.household.id, by: f.child.id,
+            name: "Oat milk", category: .drinks
+        )
+
+        #expect(edited.id == original.id)
+        #expect(edited.name.value == "Oat milk")
+        #expect(edited.category == .drinks)
+        // Untouched by the edit, including who added it — the alternative to
+        // editing is deleting and retyping, which loses exactly this.
+        #expect(edited.quantity == 2)
+        #expect(edited.addedBy == f.parent.id)
+        #expect(edited.addedAt == original.addedAt)
+    }
+
+    @Test("Clearing a unit and leaving it alone are different instructions")
+    func clearingIsDistinctFromOmitting() async throws {
+        let f = try await makeFixture()
+        let original = try await f.commands.addShoppingItem(
+            "Flour", to: f.list.id, in: f.household.id, by: f.parent.id
+        )
+        let withUnit = try await f.commands.updateShoppingItem(
+            original.id, in: f.household.id, by: f.parent.id, unit: "kg", note: "plain"
+        )
+        #expect(withUnit.unit == "kg")
+
+        // Omitted: left alone.
+        let renamed = try await f.commands.updateShoppingItem(
+            original.id, in: f.household.id, by: f.parent.id, name: "Strong flour"
+        )
+        #expect(renamed.unit == "kg")
+        #expect(renamed.note?.value == "plain")
+
+        // Explicitly nil: cleared.
+        let cleared = try await f.commands.updateShoppingItem(
+            original.id, in: f.household.id, by: f.parent.id, unit: .some(nil), note: .some(nil)
+        )
+        #expect(cleared.unit == nil)
+        #expect(cleared.note == nil)
+    }
+
+    @Test("An item already in the trolley can still be corrected")
+    func boughtItemsCanBeEdited() async throws {
+        // Noticing the quantity was wrong is exactly what happens at the till.
+        let f = try await makeFixture()
+        let item = try await f.commands.addShoppingItem(
+            "Milk", to: f.list.id, in: f.household.id, by: f.parent.id
+        )
+        try await f.commands.setShoppingItem(
+            item.id, purchased: true, in: f.household.id, by: f.parent.id
+        )
+
+        let edited = try await f.commands.updateShoppingItem(
+            item.id, in: f.household.id, by: f.parent.id, quantity: 3
+        )
+        #expect(edited.quantity == 3)
+        #expect(!edited.isPending)
+    }
+
+    @Test("An edit that the domain would refuse leaves the item as it was")
+    func invalidEditsAreRejected() async throws {
+        let f = try await makeFixture()
+        let item = try await f.commands.addShoppingItem(
+            "Milk", to: f.list.id, in: f.household.id, by: f.parent.id
+        )
+
+        await #expect(throws: DomainError.blank(field: .itemName)) {
+            try await f.commands.updateShoppingItem(
+                item.id, in: f.household.id, by: f.parent.id, name: "   "
+            )
+        }
+        await #expect(
+            throws: DomainError.outOfRange(field: .quantity, allowed: Limits.itemQuantity)
+        ) {
+            try await f.commands.updateShoppingItem(
+                item.id, in: f.household.id, by: f.parent.id, quantity: 0
+            )
+        }
+
+        let snapshot = try await f.store.snapshot(of: f.household.id)
+        #expect(snapshot.shoppingItems.first?.name.value == "Milk")
+        #expect(snapshot.shoppingItems.first?.quantity == 1)
+    }
+
+    @Test("Editing an item that is no longer there says so")
+    func editingAMissingItem() async throws {
+        let f = try await makeFixture()
+        let ghost = Identifier<ShoppingItem>()
+
+        await #expect(
+            throws: DomainError.notFound(entity: "Item", id: ghost.description)
+        ) {
+            try await f.commands.updateShoppingItem(
+                ghost, in: f.household.id, by: f.parent.id, quantity: 2
+            )
+        }
+    }
+
+    @Test("A member who has left cannot edit the list")
+    func removedMembersCannotEditItems() async throws {
+        let f = try await makeFixture()
+        let item = try await f.commands.addShoppingItem(
+            "Milk", to: f.list.id, in: f.household.id, by: f.parent.id
+        )
+        try await f.commands.removeMember(f.child.id, from: f.household.id, by: f.parent.id)
+
+        await #expect(throws: DomainError.memberNotInHousehold(f.child.id)) {
+            try await f.commands.updateShoppingItem(
+                item.id, in: f.household.id, by: f.child.id, quantity: 2
+            )
+        }
+    }
+
     @Test("A purchased item does not absorb a newly added one")
     func purchasedItemsDoNotAbsorb() async throws {
         // Milk bought last week must not silently swallow this week's milk.

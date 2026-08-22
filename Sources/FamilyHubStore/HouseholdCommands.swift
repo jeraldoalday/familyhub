@@ -703,6 +703,64 @@ public struct HouseholdCommands: Sendable {
         return item
     }
 
+    /// Edits an item, leaving anything not named alone.
+    ///
+    /// One command rather than five, for the same reason ``updateChore(_:in:by:title:notes:assignment:points:startingOn:recurrence:category:)``
+    /// is one: an item editor saves every field at once, and five commands
+    /// would mean five writes, five change notifications, and a window in which
+    /// the row is half-edited on somebody else's phone mid-shop.
+    ///
+    /// `unit` and `note` are double optionals so that "leave it alone" and
+    /// "clear it" stay distinguishable: omit the parameter for the former, pass
+    /// `.some(nil)` for the latter.
+    ///
+    /// An item can be edited after it has been bought. That is deliberate:
+    /// correcting the quantity on something already in the trolley is exactly
+    /// when somebody notices it was wrong.
+    ///
+    /// - Parameters:
+    ///   - itemID: The item to edit.
+    ///   - householdID: The household it belongs to.
+    ///   - memberID: Who is editing it.
+    ///   - name: A new name, if it is being renamed.
+    ///   - quantity: A new quantity.
+    ///   - unit: A new unit, or `.some(nil)` to clear it.
+    ///   - category: A different aisle. This is the one-tap correction that
+    ///     makes guessing the aisle defensible in the first place.
+    ///   - note: A new note, or `.some(nil)` to clear it.
+    /// - Returns: The item as it now stands.
+    /// - Throws: ``DomainError/notFound(entity:id:)`` when the item is gone,
+    ///   ``DomainError/notPermitted(action:role:)``, or a validation error from
+    ///   the new values.
+    @discardableResult
+    public func updateShoppingItem(
+        _ itemID: Identifier<ShoppingItem>,
+        in householdID: Identifier<Household>,
+        by memberID: Identifier<Member>,
+        name: String? = nil,
+        quantity: Int? = nil,
+        unit: String?? = nil,
+        category: ShoppingItem.Category? = nil,
+        note: String?? = nil
+    ) async throws -> ShoppingItem {
+        let snapshot = try await store.snapshot(of: householdID)
+        let member = try snapshot.requireActiveMember(memberID)
+        try Permissions.check(.manageShoppingList, for: member.role)
+
+        guard var item = snapshot.shoppingItems.first(where: { $0.id == itemID }) else {
+            throw DomainError.notFound(entity: "Item", id: itemID.description)
+        }
+
+        if let name { item = try item.renamed(to: name) }
+        if let quantity { item = try item.withQuantity(quantity) }
+        if let unit { item = item.withUnit(unit) }
+        if let category { item = item.inCategory(category) }
+        if let note { item = try item.withNote(note) }
+
+        try await store.save(item)
+        return item
+    }
+
     /// Ticks an item off, or puts it back on the list.
     @discardableResult
     public func setShoppingItem(
