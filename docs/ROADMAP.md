@@ -5,7 +5,7 @@ Two weeks, from a tested domain core to something submittable to App Review.
 ## Where things stand
 
 **Day 1 is done, and then some.** The domain and store layers are complete and
-tested: 581 tests covering recurrence, chore rotation, permissions, the points
+tested: 653 tests covering recurrence, chore rotation, permissions, the points
 ledger, shopping lists, streaks, the weekly recap, workload fairness, reminder
 planning, meal planning, the family calendar, the command layer, the change
 feed, and the backup format. `make check` builds, tests, and lints in a few
@@ -16,6 +16,18 @@ reminders, and the recap are all decisions about *what the app should say*, and
 deciding those against a test suite is faster and considerably more honest than
 deciding them against a running build at seven in the evening. What they leave
 for their own days is wiring rather than judgement.
+
+Three smaller things were pulled forward on the same argument. Onboarding's
+"pick your first chores" step now has a catalogue behind it rather than a
+screen that will have to invent one — what a chore is worth and how often it
+genuinely needs doing are judgements, and judgements are cheaper to make
+against a test suite than against a half-built screen at seven in the evening.
+Search was pulled forward because it is the one feature that has to know about
+every other one, and writing it after six screens each have their own filter
+means deleting six filters. And an item's aisle is now guessed from its name,
+which turned the aisle grouping from a feature nobody would reach — it needed a
+ten-item menu on the fast path — into one that works by default, including on
+the list the meal plan generates without a person touching it.
 
 The calendar was pulled forward for a different reason. It was the last feature
 the README promised that the domain could not answer a single question about,
@@ -72,7 +84,10 @@ whenever there is a day for it.
 **Day 5 — onboarding.** Create-household, add-members, and pick-first-chores.
 This is the flow that decides whether a family ever reaches the value, and it
 is worth more attention than its size suggests. Includes the guided tour
-running against `DemoHousehold`.
+running against `DemoHousehold`. The last step is now presentation rather than
+decision: `ChorePack` holds five themed sets filtered by who is actually in the
+household, and `installChorePack` handles the household that has already
+written half of one down.
 
 **Day 6 — consolidation.** Three days of view code will have produced
 duplicated modifiers, near-identical rows, and at least one piece of business

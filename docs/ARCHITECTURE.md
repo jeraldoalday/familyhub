@@ -27,7 +27,7 @@ and then it stops being faster, for three specific reasons.
 **Testability.** Every rule in this app is about time — recurrence, streaks,
 overdue states, cooldowns. Rules that live on a `@Model` need a container to
 test, which means tests that take seconds instead of microseconds, which in
-practice means tests that do not get written. The 581 tests here run in under
+practice means tests that do not get written. The 653 tests here run in under
 half a second because none of them touch a database.
 
 **Replaceability.** Local-only storage today, iCloud sync later. With rules in
@@ -117,6 +117,37 @@ four on every day it recurs — including the two days a year a stored `Date`
 would move it by an hour. Spans are built by adding minutes to the start of the
 day rather than by setting an hour on it, because on the morning the clocks go
 forward there is no half past one and `date(bySettingHour:)` answers nil for it.
+
+**`HouseholdSearch`** is where the layering pays off most visibly and is
+also the easiest place to make a screen feel slow. One matcher over the whole
+snapshot rather than a filter per screen, because six per-screen filters are
+six places for the same folding bug to be fixed five times — and because a
+family that remembers the word "swimming" wants the lesson, the goggles, and
+the chore about the wet towels without being asked which tab that lives on.
+
+Two things about it are load-bearing. Matching happens before describing: a
+row's second line renders a schedule or resolves an event's participants, and a
+query matching a thousand records to show eight must not assemble the other
+nine hundred and ninety-two. And a query with no space in it is compared with
+`range(of:options:)` rather than against a folded copy of each name, which is
+sound rather than approximate — folding beyond case and accents only collapses
+runs of whitespace, which can neither create nor destroy a match containing
+none. A multi-word query takes the long way for exactly that reason. Both are
+covered by `HotPathTests`, because a search box is the one screen where this is
+visible as the field lagging behind the person typing.
+
+**Guessing beats asking, where a wrong guess costs one tap.**
+`ShoppingItem.Category.inferred(from:)` files an item into an aisle by its
+name. The alternative is what was there before: a ten-item menu on the fast
+path, which nobody uses, so everything lands in "Other" and the aisle grouping
+— the whole reason the shop takes one pass instead of three — never pays off.
+The rule that keeps it honest is that an unrecognised name stays in "Other"
+rather than being pushed to the nearest-looking section; an item filed
+confidently in the wrong aisle is walked past, and one filed honestly in no
+aisle is read. `guess(for:)` and `inferred(from:fallback:)` are separate
+because "we do not know" and "we think this is miscellaneous" are different
+answers, and collapsing them is how a guess overwrites a choice somebody made
+by hand.
 
 **Conflict resolution** lives in
 `Collection<ChoreCompletion>.deduplicatedByOccurrence()` and, in the same shape,
