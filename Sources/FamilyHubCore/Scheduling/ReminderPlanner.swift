@@ -33,6 +33,9 @@ public struct Reminder: Sendable, Hashable, Identifiable {
         /// Something on the calendar is about to start.
         case eventSoon(eventID: Identifier<CalendarEvent>)
 
+        /// Somebody has asked this person to take a chore off them today.
+        case coverRequested(requestID: Identifier<CoverRequest>, others: Int)
+
         /// How disruptive this kind is allowed to be, lowest first.
         ///
         /// Used to decide what survives the per-person daily cap. The ladder is
@@ -47,10 +50,16 @@ public struct Reminder: Sendable, Hashable, Identifiable {
         /// week with holes in it can be planned any evening, so it sits below a
         /// birthday and above a list of chores that is also visible on the home
         /// screen.
+        ///
+        /// A cover request sits just under a streak because it is the only kind
+        /// here that another person is waiting on. Unanswered, it is not one
+        /// evening that goes wrong but two: the chore does not get done, and
+        /// the person who asked finds out too late to do it themselves.
         public var priority: Int {
             switch self {
-            case .eventSoon: 6
-            case .streakAtRisk: 5
+            case .eventSoon: 7
+            case .streakAtRisk: 6
+            case .coverRequested: 5
             case .cookingTonight: 4
             case .approvalsWaiting: 3
             case .birthday: 2
@@ -138,6 +147,14 @@ public struct ReminderSchedule: Hashable, Sendable, Codable {
     /// Whether anything about the meal plan is sent at all.
     public var sendsMealReminders: Bool
 
+    /// Whether a person is told when somebody has asked them to cover a chore.
+    ///
+    /// The one switch here a household should think twice about. Every other
+    /// kind of reminder is the app noticing something; this one is a person
+    /// asking another person a question, and a question that never arrives is
+    /// answered by the chore not being done.
+    public var sendsCoverRequests: Bool
+
     /// Whether calendar events are allowed to interrupt anybody.
     ///
     /// Only events that asked to are sent regardless — an event's reminder
@@ -155,7 +172,8 @@ public struct ReminderSchedule: Hashable, Sendable, Codable {
         sendsStreakNudges: Bool = true,
         cookingHour: Int = 16,
         sendsMealReminders: Bool = true,
-        sendsEventReminders: Bool = true
+        sendsEventReminders: Bool = true,
+        sendsCoverRequests: Bool = true
     ) {
         self.morningHour = min(23, max(0, morningHour))
         self.eveningHour = min(23, max(0, eveningHour))
@@ -165,6 +183,7 @@ public struct ReminderSchedule: Hashable, Sendable, Codable {
         self.cookingHour = min(23, max(0, cookingHour))
         self.sendsMealReminders = sendsMealReminders
         self.sendsEventReminders = sendsEventReminders
+        self.sendsCoverRequests = sendsCoverRequests
     }
 
     /// Decodes a schedule saved by an older build.
@@ -198,7 +217,10 @@ public struct ReminderSchedule: Hashable, Sendable, Codable {
             ) ?? standard.sendsMealReminders,
             sendsEventReminders: try container.decodeIfPresent(
                 Bool.self, forKey: .sendsEventReminders
-            ) ?? standard.sendsEventReminders
+            ) ?? standard.sendsEventReminders,
+            sendsCoverRequests: try container.decodeIfPresent(
+                Bool.self, forKey: .sendsCoverRequests
+            ) ?? standard.sendsCoverRequests
         )
     }
 
@@ -243,6 +265,7 @@ public struct ReminderPlanner: Sendable {
         planned.append(contentsOf: morningReminders(on: today, calendar: calendar))
         planned.append(contentsOf: mealReminders(on: today, calendar: calendar))
         planned.append(contentsOf: eventReminders(on: today, calendar: calendar))
+        planned.append(contentsOf: coverReminders(on: today, now: now, calendar: calendar))
         planned.append(
             contentsOf: eveningReminders(on: today, calendar: calendar, streaks: streaks)
         )
@@ -534,6 +557,68 @@ public struct ReminderPlanner: Sendable {
         return calendar.date(byAdding: .minute, value: -lead, to: anchor)
     }
 
+    // MARK: - Cover
+
+    /// One reminder per person who has been asked to take a chore off somebody
+    /// today.
+    ///
+    /// One, not one per request. A person asked to cover three chores who gets
+    /// three notifications answers none of them, and the cap would in any case
+    /// throw two away — so the reminder names the oldest ask and says how many
+    /// others are behind it, which is the same argument the evening streak
+    /// nudge is built on.
+    ///
+    /// Only requests for chores falling *today* are considered. A request for
+    /// Wednesday, planned on Monday, would otherwise interrupt somebody two
+    /// days before there is anything to decide.
+    private func coverReminders(on day: Date, now: Date, calendar: Calendar) -> [Reminder] {
+        guard schedule.sendsCoverRequests else { return [] }
+
+        let today = calendar.startOfDay(for: day)
+        let todaysAsks = snapshot.coverRequests.open.filter { $0.day == today }
+        guard !todaysAsks.isEmpty else { return [] }
+
+        return snapshot.activeMembers.compactMap { member in
+            let inbox = todaysAsks.filter { $0.isAddressed(to: member.id) }
+            guard let oldest = inbox.first,
+                let requester = snapshot.member(oldest.requestedBy),
+                let chore = snapshot.chore(oldest.choreID),
+                let fireDate = nextInterruption(on: today, after: now, calendar: calendar)
+            else { return nil }
+
+            return Reminder(
+                id: identity(member.id, today, "cover-\(oldest.id)", calendar: calendar),
+                recipientID: member.id,
+                fireDate: fireDate,
+                title: "Can you cover?",
+                body: Self.coverBody(
+                    requester: requester.name.value,
+                    chore: chore.title.value,
+                    note: oldest.note?.value,
+                    others: inbox.count - 1
+                ),
+                kind: .coverRequested(requestID: oldest.id, others: inbox.count - 1)
+            )
+        }
+    }
+
+    /// The household's next scheduled interruption on `day`, or `nil` if both
+    /// have gone by.
+    ///
+    /// A cover request is the one thing here that is not planned the evening
+    /// before — it is asked at eight in the morning when somebody realises
+    /// they are out — so pinning it to the morning digest would mean most
+    /// requests never produced a reminder at all. Falling through to the
+    /// evening hour gets the person one interruption on the day it matters
+    /// without inventing a third time the app is allowed to speak.
+    private func nextInterruption(on day: Date, after now: Date, calendar: Calendar) -> Date? {
+        let candidates = [
+            time(schedule.morningHour, on: day, calendar: calendar),
+            time(schedule.eveningHour, on: day, calendar: calendar),
+        ]
+        return candidates.compactMap { $0 }.sorted().first { $0 > now }
+    }
+
     // MARK: - Evening
 
     /// The evening nudge: one per person, naming the streak with most at stake.
@@ -678,6 +763,26 @@ extension ReminderPlanner {
     static func eventBody(when: String, location: String?) -> String {
         guard let location, !location.isEmpty else { return when }
         return "\(when) · \(location)"
+    }
+
+    /// Names who asked and what for, and carries their reason when they gave
+    /// one — a bare "can you cover?" is a notification that has to be opened
+    /// before it can be answered, which is most of the work it was meant to
+    /// save.
+    static func coverBody(requester: String, chore: String, note: String?, others: Int) -> String {
+        // "needs cover for" rather than "asked you to", because a request left
+        // open to the household reaches everybody in it and telling four people
+        // they were each asked personally is four small untruths.
+        var sentence = "\(requester) needs cover for \(chore) today"
+        if let note, !note.isEmpty {
+            sentence += " — \(note)"
+        }
+        sentence += "."
+        guard others > 0 else { return sentence }
+        return sentence
+            + (others == 1
+                ? " There's 1 more ask waiting."
+                : " There are \(others) more asks waiting.")
     }
 
     /// Names the chore and the number, because that is the whole reason this
