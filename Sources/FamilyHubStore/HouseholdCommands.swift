@@ -441,11 +441,15 @@ public struct HouseholdCommands: Sendable {
             throw DomainError.notScheduled(on: normalizedDay)
         }
 
+        let key = ChoreCompletion.OccurrenceKey(choreID: choreID, day: normalizedDay)
+        let coveringMemberID = snapshot.coverRequests.coverFor(key)
+
         try Permissions.authorizeCompletion(
             of: chore,
             on: normalizedDay,
             by: member,
-            engine: snapshot.engine
+            engine: snapshot.engine,
+            coveringMemberID: coveringMemberID
         )
 
         // Guards the double-tap and the two-devices case alike. Without it the
@@ -457,7 +461,6 @@ public struct HouseholdCommands: Sendable {
         // every store here writes by identifier — one occurrence stays one row,
         // the rejection is superseded rather than left to argue with its own
         // replacement, and a redo replayed by a sync retry still converges.
-        let key = ChoreCompletion.OccurrenceKey(choreID: choreID, day: normalizedDay)
         let existing = snapshot.completions.first { $0.occurrenceKey == key }
         if let existing, !existing.approval.isRejected {
             throw DomainError.alreadyCompleted
@@ -482,6 +485,14 @@ public struct HouseholdCommands: Sendable {
         // that goes down for reasons they cannot see.
         if completion.approval.countsTowardBalance, chore.points > 0 {
             try await store.append(.earned(completion, note: chore.title.value))
+        }
+
+        // The work is done, so nobody needs to be asked to do it. An open
+        // request left standing would sit on a sibling's list all evening
+        // asking about a chore that is finished, and answering it would hand
+        // them an occurrence that no longer exists.
+        for request in snapshot.coverRequests.about(key) where request.resolution.isOpen {
+            try await store.save(try request.withdrawn(at: dateProvider.now))
         }
 
         return completion
@@ -1530,6 +1541,202 @@ public struct HouseholdCommands: Sendable {
         _ = try snapshot.requireEvent(eventID)
         try Permissions.check(.manageHousehold, for: actor.role)
         try await store.deleteEvent(eventID)
+    }
+
+    // MARK: - Cover
+
+    /// Asks the household — or one person in it — to take an occurrence off the
+    /// requester.
+    ///
+    /// The chore is untouched. What is written is an exception for one day, in
+    /// the same spirit as a skipped day, because moving one Tuesday by editing
+    /// the rota would move every Tuesday after it.
+    ///
+    /// Asking twice for the same thing returns the request that already exists
+    /// rather than adding a second one. A person tapping again because the
+    /// screen has not updated is not making a second ask, and two open requests
+    /// for one square are two people's lists asking about the same chore.
+    ///
+    /// - Parameters:
+    ///   - choreID: The chore to be covered.
+    ///   - day: The occurrence's day.
+    ///   - householdID: The household it belongs to.
+    ///   - memberID: Who is asking.
+    ///   - askedOf: Who is being asked, or `nil` to ask the household.
+    ///   - note: An optional reason, in the requester's words.
+    /// - Returns: The open request.
+    /// - Throws: ``DomainError/notScheduled(on:)`` when the chore does not fall
+    ///   on that day, ``DomainError/alreadyCompleted`` when there is nothing
+    ///   left to cover, ``DomainError/coverAlreadySettled`` when somebody has
+    ///   already taken it on, ``DomainError/cannotCoverForYourself`` when the
+    ///   requester asks themselves, or whatever
+    ///   ``Permissions/authorizeCoverRequest(of:on:by:engine:)`` throws.
+    @discardableResult
+    public func requestCover(
+        of choreID: Identifier<Chore>,
+        on day: Date,
+        in householdID: Identifier<Household>,
+        by memberID: Identifier<Member>,
+        askedOf: Identifier<Member>? = nil,
+        note: String? = nil
+    ) async throws -> CoverRequest {
+        let snapshot = try await store.snapshot(of: householdID)
+        let chore = try snapshot.requireChore(choreID)
+        let member = try snapshot.requireActiveMember(memberID)
+        let calendar = snapshot.household.calendar()
+        let normalizedDay = calendar.startOfDay(for: day)
+
+        // Asked first, for the reason completing a chore asks it first: a day
+        // the schedule never produced is not a permission question, and an
+        // archived chore has no occurrences for anybody to cover.
+        guard chore.occurs(on: normalizedDay, using: snapshot.engine) else {
+            throw DomainError.notScheduled(on: normalizedDay)
+        }
+
+        try Permissions.authorizeCoverRequest(
+            of: chore,
+            on: normalizedDay,
+            by: member,
+            engine: snapshot.engine
+        )
+
+        if let askedOf {
+            // Active, not merely on file. A request addressed to somebody who
+            // has moved out is a question nobody will ever answer, sitting on
+            // the requester's screen looking like it might be.
+            _ = try snapshot.requireActiveMember(askedOf)
+            guard askedOf != memberID else {
+                throw DomainError.cannotCoverForYourself
+            }
+        }
+
+        let key = ChoreCompletion.OccurrenceKey(choreID: choreID, day: normalizedDay)
+        if let completion = snapshot.completions.first(where: { $0.occurrenceKey == key }),
+            completion.approval.countsAsDone
+        {
+            throw DomainError.alreadyCompleted
+        }
+        guard snapshot.coverRequests.coverFor(key) == nil else {
+            throw DomainError.coverAlreadySettled
+        }
+
+        let existing = snapshot.coverRequests.about(key).first {
+            $0.resolution.isOpen && $0.requestedBy == memberID && $0.askedOf == askedOf
+        }
+        if let existing { return existing }
+
+        let request = try CoverRequest(
+            householdID: householdID,
+            choreID: choreID,
+            day: normalizedDay,
+            requestedBy: memberID,
+            askedOf: askedOf,
+            note: note,
+            createdAt: dateProvider.now,
+            calendar: calendar
+        )
+        try await store.save(request)
+        return request
+    }
+
+    /// Takes on the occurrence a request is about.
+    ///
+    /// - Parameters:
+    ///   - requestID: The request being accepted.
+    ///   - householdID: The household it belongs to.
+    ///   - actorID: Who is covering.
+    /// - Returns: The accepted request.
+    /// - Throws: ``DomainError/coverAlreadySettled`` when somebody answered
+    ///   first, ``DomainError/notScheduled(on:)`` when the chore has since been
+    ///   archived or the day skipped, or whatever
+    ///   ``Permissions/authorizeCoverAnswer(to:by:)`` throws.
+    @discardableResult
+    public func acceptCover(
+        _ requestID: Identifier<CoverRequest>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> CoverRequest {
+        let snapshot = try await store.snapshot(of: householdID)
+        let request = try snapshot.requireCoverRequest(requestID)
+        let actor = try snapshot.requireActiveMember(actorID)
+        let chore = try snapshot.requireChore(request.choreID)
+
+        try Permissions.authorizeCoverAnswer(to: request, by: actor)
+
+        // The world moves between asking and answering. A chore archived, or a
+        // day the family has since skipped, leaves an occurrence nobody can do
+        // — and accepting it would put a chore on somebody's list that the
+        // agenda will never show.
+        guard chore.occurs(on: request.day, using: snapshot.engine) else {
+            throw DomainError.notScheduled(on: request.day)
+        }
+
+        // Two requests for one square is an ordinary thing to produce: ask a
+        // sibling, hear nothing, ask the household. Only one of them can be
+        // accepted, or two people spend the evening believing they owe the
+        // same chore.
+        guard snapshot.coverRequests.coverFor(request.occurrenceKey) == nil else {
+            throw DomainError.coverAlreadySettled
+        }
+
+        let accepted = try request.accepted(by: actorID, at: dateProvider.now)
+        try await store.save(accepted)
+        return accepted
+    }
+
+    /// Turns a request down.
+    ///
+    /// Recorded rather than discarded. "Alex said no" is what tells the person
+    /// who asked to go and ask somebody else, and a request that quietly
+    /// vanished would leave them waiting on an answer that already came.
+    ///
+    /// - Parameters:
+    ///   - requestID: The request being declined.
+    ///   - householdID: The household it belongs to.
+    ///   - actorID: Who is saying no.
+    /// - Returns: The declined request.
+    /// - Throws: Whatever ``Permissions/authorizeCoverAnswer(to:by:)`` throws.
+    @discardableResult
+    public func declineCover(
+        _ requestID: Identifier<CoverRequest>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> CoverRequest {
+        let snapshot = try await store.snapshot(of: householdID)
+        let request = try snapshot.requireCoverRequest(requestID)
+        let actor = try snapshot.requireActiveMember(actorID)
+
+        try Permissions.authorizeCoverAnswer(to: request, by: actor)
+
+        let declined = try request.declined(by: actorID, at: dateProvider.now)
+        try await store.save(declined)
+        return declined
+    }
+
+    /// Takes a request back.
+    ///
+    /// - Parameters:
+    ///   - requestID: The request being withdrawn.
+    ///   - householdID: The household it belongs to.
+    ///   - actorID: Who is withdrawing it — the person who asked, or an adult.
+    /// - Returns: The withdrawn request.
+    /// - Throws: Whatever ``Permissions/authorizeCoverWithdrawal(of:by:)``
+    ///   throws.
+    @discardableResult
+    public func withdrawCover(
+        _ requestID: Identifier<CoverRequest>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> CoverRequest {
+        let snapshot = try await store.snapshot(of: householdID)
+        let request = try snapshot.requireCoverRequest(requestID)
+        let actor = try snapshot.requireActiveMember(actorID)
+
+        try Permissions.authorizeCoverWithdrawal(of: request, by: actor)
+
+        let withdrawn = try request.withdrawn(at: dateProvider.now)
+        try await store.save(withdrawn)
+        return withdrawn
     }
 
     // MARK: - Shared plumbing
