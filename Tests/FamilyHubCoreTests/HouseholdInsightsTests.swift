@@ -92,15 +92,35 @@ struct HouseholdInsightsTests {
         _ f: Fixture,
         chores: [Chore],
         completions: [ChoreCompletion] = [],
-        ledgerEntries: [LedgerEntry] = []
+        ledgerEntries: [LedgerEntry] = [],
+        coverRequests: [CoverRequest] = []
     ) -> HouseholdSnapshot {
         HouseholdSnapshot(
             household: f.household,
             members: [f.parent, f.sam, f.alex],
             chores: chores,
             completions: completions,
-            ledgerEntries: ledgerEntries
+            ledgerEntries: ledgerEntries,
+            coverRequests: coverRequests
         )
+    }
+
+    private func cover(
+        _ f: Fixture,
+        of chore: Chore,
+        on offset: Int,
+        by requester: Identifier<Member>,
+        acceptedBy coverer: Identifier<Member>
+    ) throws -> CoverRequest {
+        try CoverRequest(
+            householdID: f.household.id,
+            choreID: chore.id,
+            day: day(offset),
+            requestedBy: requester,
+            createdAt: day(offset - 1),
+            calendar: calendar
+        )
+        .accepted(by: coverer, at: day(offset))
     }
 
     // MARK: Recap totals
@@ -335,6 +355,64 @@ struct HouseholdInsightsTests {
         #expect(balance.carryingMost?.id == f.sam.id)
         #expect(balance.shares.first?.share == 1)
         #expect(abs((balance.shares.first?.deviation ?? 0) - 2.0 / 3.0) < 0.0001)
+    }
+
+    @Test("A covered day counts against whoever took it on")
+    func coveredWorkCountsAgainstTheCoverer() throws {
+        // Crediting the rota for work somebody else agreed to do is not a
+        // guess, it is a known-wrong number — and the weeks somebody carried
+        // more than their share are the only weeks anybody opens this screen.
+        let f = try makeFixture()
+        let bins = try makeChore(f, title: "Bins", assignment: .member(f.sam.id), points: 10)
+        let covers = [try cover(f, of: bins, on: 1, by: f.sam.id, acceptedBy: f.alex.id)]
+
+        let balance = snapshot(f, chores: [bins], coverRequests: covers).insights
+            .workloadBalance(from: day(0), to: day(2))
+
+        let sam = try #require(balance.shares.first { $0.member.id == f.sam.id })
+        let alex = try #require(balance.shares.first { $0.member.id == f.alex.id })
+        #expect(sam.occurrences == 2)
+        #expect(alex.occurrences == 1)
+        #expect(alex.points == 10)
+    }
+
+    @Test("An unanswered ask leaves the work where the rota put it")
+    func openRequestDoesNotMoveTheWorkload() throws {
+        let f = try makeFixture()
+        let bins = try makeChore(f, title: "Bins", assignment: .member(f.sam.id), points: 10)
+        let asked = try CoverRequest(
+            householdID: f.household.id,
+            choreID: bins.id,
+            day: day(1),
+            requestedBy: f.sam.id,
+            createdAt: day(0),
+            calendar: calendar
+        )
+
+        let balance = snapshot(f, chores: [bins], coverRequests: [asked]).insights
+            .workloadBalance(from: day(0), to: day(2))
+
+        #expect(balance.shares.first { $0.member.id == f.sam.id }?.occurrences == 3)
+        #expect(balance.shares.first { $0.member.id == f.alex.id }?.occurrences == 0)
+    }
+
+    @Test("The recap counts a covered day as the coverer's, done or not")
+    func recapCountsCoveredWorkAgainstTheCoverer() throws {
+        let f = try makeFixture()
+        let bins = try makeChore(f, title: "Bins", assignment: .member(f.sam.id), points: 10)
+        let covers = [try cover(f, of: bins, on: 1, by: f.sam.id, acceptedBy: f.alex.id)]
+        let completions = [completion(f, of: bins, on: 1, by: f.alex.id)]
+
+        let recap = snapshot(
+            f, chores: [bins], completions: completions, coverRequests: covers
+        ).insights.recap(from: day(0), to: day(2))
+
+        let sam = try #require(recap.members.first { $0.member.id == f.sam.id })
+        let alex = try #require(recap.members.first { $0.member.id == f.alex.id })
+        #expect(sam.assigned == 2)
+        #expect(alex.assigned == 1)
+        #expect(alex.completed == 1)
+        #expect(alex.completedByThem == 1)
     }
 
     @Test("Share is weighted by points, not by chore count")

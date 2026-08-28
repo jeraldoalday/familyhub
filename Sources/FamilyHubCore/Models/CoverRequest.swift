@@ -287,6 +287,20 @@ extension CoverRequest {
     }
 }
 
+// MARK: - Ordering
+
+extension CoverRequest {
+    /// Which of two accepted requests settles an occurrence: the earlier
+    /// acceptance, with the identifier breaking an exact tie so every device
+    /// converges on the same answer without negotiating.
+    public static func acceptanceOrder(_ lhs: CoverRequest, _ rhs: CoverRequest) -> Bool {
+        let left = lhs.resolution.settledAt ?? lhs.createdAt
+        let right = rhs.resolution.settledAt ?? rhs.createdAt
+        if left != right { return left < right }
+        return lhs.id < rhs.id
+    }
+}
+
 // MARK: - Collections
 
 extension Collection where Element == CoverRequest {
@@ -328,12 +342,30 @@ extension Collection where Element == CoverRequest {
     public func acceptedCoverFor(_ key: ChoreCompletion.OccurrenceKey) -> CoverRequest? {
         about(key)
             .filter(\.resolution.isAccepted)
-            .min { lhs, rhs in
-                let left = lhs.resolution.settledAt ?? lhs.createdAt
-                let right = rhs.resolution.settledAt ?? rhs.createdAt
-                if left != right { return left < right }
-                return lhs.id < rhs.id
+            .min(by: CoverRequest.acceptanceOrder)
+    }
+
+    /// Every occurrence somebody has taken on, indexed by occurrence.
+    ///
+    /// The same answer ``acceptedCoverFor(_:)`` gives, for callers that need it
+    /// about many occurrences at once — the agenda, the weekly recap, the
+    /// fairness screen. Each of them walks a range of days, and asking per
+    /// occurrence would put a scan of the household's whole swap history inside
+    /// that walk.
+    ///
+    /// - Returns: The winning request for each covered occurrence.
+    public func acceptedCoversByOccurrence() -> [ChoreCompletion.OccurrenceKey: CoverRequest] {
+        var winners: [ChoreCompletion.OccurrenceKey: CoverRequest] = [:]
+        for request in self where request.resolution.isAccepted {
+            guard let held = winners[request.occurrenceKey] else {
+                winners[request.occurrenceKey] = request
+                continue
             }
+            if CoverRequest.acceptanceOrder(request, held) {
+                winners[request.occurrenceKey] = request
+            }
+        }
+        return winners
     }
 
     /// The live requests `memberID` could answer, oldest first.

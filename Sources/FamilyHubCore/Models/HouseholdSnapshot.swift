@@ -337,19 +337,7 @@ extension HouseholdSnapshot {
         // Indexed once, for the same reason the completions are: a household
         // that swaps chores often accumulates requests, and searching them per
         // chore would put a second linear scan inside the loop.
-        var coverByOccurrence: [ChoreCompletion.OccurrenceKey: CoverRequest] = [:]
-        for request in coverRequests where request.resolution.isAccepted {
-            let key = request.occurrenceKey
-            guard let existing = coverByOccurrence[key] else {
-                coverByOccurrence[key] = request
-                continue
-            }
-            let incoming = request.resolution.settledAt ?? request.createdAt
-            let held = existing.resolution.settledAt ?? existing.createdAt
-            if incoming < held || (incoming == held && request.id < existing.id) {
-                coverByOccurrence[key] = request
-            }
-        }
+        let coverByOccurrence = coverRequests.acceptedCoversByOccurrence()
 
         // Indexed once rather than searched per chore: a household with a
         // year of history has thousands of completions, and a linear scan

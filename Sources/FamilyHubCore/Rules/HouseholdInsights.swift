@@ -258,6 +258,10 @@ public struct HouseholdInsights: Sendable {
     /// guessing who "would have" done an unclaimed chore is exactly the sort of
     /// invented number that makes a fairness screen untrustworthy.
     ///
+    /// A covered occurrence counts against whoever took it on, for the same
+    /// reason: crediting the person the rota named for work somebody else
+    /// agreed to do is not a guess but a known-wrong number.
+    ///
     /// - Parameters:
     ///   - start: The first day counted.
     ///   - end: The last day counted.
@@ -318,6 +322,9 @@ public struct HouseholdInsights: Sendable {
     private struct ScheduledOccurrence {
         let chore: Chore
         let day: Date
+
+        /// Who the work actually belonged to that day: whoever took it on when
+        /// somebody covered, and otherwise whoever the rota named.
         let assigneeID: Identifier<Member>?
     }
 
@@ -328,14 +335,24 @@ public struct HouseholdInsights: Sendable {
     /// day, which on a week of daily chores is seven times the work for the
     /// same answer — and grows with the household's whole history rather than
     /// with the week being summarised.
+    ///
+    /// An occurrence somebody covered counts against the person who covered
+    /// it. A fairness screen crediting the rota rather than the household is a
+    /// fairness screen that is wrong about the exact weeks somebody carried
+    /// more than their share, which are the only weeks anybody opens it.
     private func occurrences(in range: ClosedRange<Date>) -> [ScheduledOccurrence] {
-        snapshot.activeChores.flatMap { chore -> [ScheduledOccurrence] in
+        let covers = snapshot.coverRequests.acceptedCoversByOccurrence()
+        return snapshot.activeChores.flatMap { chore -> [ScheduledOccurrence] in
             chore.indexedOccurrences(in: range, using: engine, maximum: Int.max)
                 .map { occurrence in
-                    ScheduledOccurrence(
+                    let key = ChoreCompletion.OccurrenceKey(
+                        choreID: chore.id, day: occurrence.day
+                    )
+                    let rota = chore.assignee(forOccurrenceIndex: occurrence.index)
+                    return ScheduledOccurrence(
                         chore: chore,
                         day: occurrence.day,
-                        assigneeID: chore.assignee(forOccurrenceIndex: occurrence.index)
+                        assigneeID: covers[key]?.resolution.coveringMemberID ?? rota
                     )
                 }
         }
