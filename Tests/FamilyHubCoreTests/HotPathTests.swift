@@ -185,6 +185,59 @@ struct HotPathTests {
         return BusyHousehold(snapshot: snapshot, today: busy.today, members: members)
     }
 
+    /// Two years of swaps: one accepted cover on every chore, every fourth
+    /// day, plus the asks that were turned down along the way.
+    ///
+    /// A household that actually uses the feature, which is the only history
+    /// that tells you whether reading "who is doing this today" is a lookup or
+    /// a walk through every favour the family has ever done each other.
+    private func withCoverRequests(_ busy: BusyHousehold) throws -> BusyHousehold {
+        var snapshot = busy.snapshot
+        let members = busy.members
+        var requests: [CoverRequest] = []
+
+        for chore in snapshot.chores {
+            for occurrence in chore.indexedOccurrences(
+                in: chore.startDate...busy.today, using: engine, maximum: Int.max
+            ) where occurrence.index % 4 == 0 {
+                guard let asker = chore.assignee(forOccurrenceIndex: occurrence.index) else {
+                    continue
+                }
+                let coverer = members[(occurrence.index + 1) % members.count].id
+                guard coverer != asker else { continue }
+                let asked = try CoverRequest(
+                    householdID: snapshot.household.id,
+                    choreID: chore.id,
+                    day: occurrence.day,
+                    requestedBy: asker,
+                    createdAt: occurrence.day,
+                    calendar: calendar
+                )
+                requests.append(try asked.accepted(by: coverer, at: occurrence.day))
+                // The ones that were turned down stay on file too, and a
+                // household that reads only the accepted ones is a household
+                // that has not been asked to filter anything.
+                requests.append(
+                    try CoverRequest(
+                        householdID: snapshot.household.id,
+                        choreID: chore.id,
+                        day: occurrence.day,
+                        requestedBy: asker,
+                        askedOf: members[(occurrence.index + 2) % members.count].id,
+                        createdAt: occurrence.day,
+                        calendar: calendar
+                    )
+                    .declined(
+                        by: members[(occurrence.index + 2) % members.count].id,
+                        at: occurrence.day)
+                )
+            }
+        }
+
+        snapshot.coverRequests = requests
+        return BusyHousehold(snapshot: snapshot, today: busy.today, members: members)
+    }
+
     /// How long `work` took.
     private func duration(of work: () throws -> Void) rethrows -> TimeInterval {
         let started = Date()
@@ -205,6 +258,54 @@ struct HotPathTests {
         // this is a slice of the twenty rather than all of them.
         #expect(rows > 0)
         #expect(elapsed < 1.0)
+    }
+
+    @Test("The agenda stays fast on two years of swapping chores")
+    func agendaIsFastWithManyCoverRequests() throws {
+        // The index is built once per agenda rather than searched per chore.
+        // Asking per chore would put a scan of every favour the household has
+        // ever done inside the loop that renders today.
+        let busy = try withCoverRequests(try makeBusyHousehold())
+        var rows = 0
+
+        #expect(busy.snapshot.coverRequests.count > 1_000)
+
+        let elapsed = duration {
+            rows = busy.snapshot.agenda(for: busy.today, memberID: busy.members[1].id).count
+        }
+
+        #expect(rows > 0)
+        #expect(elapsed < 1.0)
+    }
+
+    @Test("The fairness screen stays fast on two years of swapping chores")
+    func workloadIsFastWithManyCoverRequests() throws {
+        let busy = try withCoverRequests(try makeBusyHousehold())
+        var shares = 0
+
+        let elapsed = duration {
+            shares =
+                busy.snapshot.insights
+                .workloadBalance(from: busy.today, to: busy.today)
+                .shares.count
+        }
+
+        #expect(shares == busy.members.count)
+        #expect(elapsed < 2.0)
+    }
+
+    @Test("A swap moves the row and does not duplicate it")
+    func coverMovesExactlyOneRow() throws {
+        // Speed is only worth having if the answer is unchanged: every covered
+        // occurrence has to leave one list and arrive on exactly one other.
+        let busy = try withCoverRequests(try makeBusyHousehold())
+        let household = busy.snapshot.agenda(for: busy.today)
+        let perMember = busy.members.flatMap {
+            busy.snapshot.agenda(for: busy.today, memberID: $0.id)
+        }
+
+        #expect(household.count == perMember.count)
+        #expect(Set(perMember.map(\.id)).count == perMember.count)
     }
 
     @Test("A member's streak stays fast on two years of history")
