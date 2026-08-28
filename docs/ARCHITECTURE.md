@@ -27,7 +27,7 @@ and then it stops being faster, for three specific reasons.
 **Testability.** Every rule in this app is about time — recurrence, streaks,
 overdue states, cooldowns. Rules that live on a `@Model` need a container to
 test, which means tests that take seconds instead of microseconds, which in
-practice means tests that do not get written. The 674 tests here run in under
+practice means tests that do not get written. The 785 tests here run in under
 half a second because none of them touch a database.
 
 **Replaceability.** Local-only storage today, iCloud sync later. With rules in
@@ -98,6 +98,25 @@ on every home-screen render. It indexes completions once rather than searching
 per chore, which is the difference between linear and quadratic on a household
 with a year of history.
 
+**Covering a chore is an exception to a day, never a change to the rota.** A
+`CoverRequest` names one occurrence, and the chore's assignment is untouched —
+the same shape as a skipped day. Editing the rota to move one Tuesday moves
+every Tuesday after it, which is a schedule change disguised as a favour and is
+not what the person asking meant. Three consequences follow and all three are
+load-bearing. An accepted cover moves the row wholesale, so the digest stops
+counting a chore against somebody who has been let off. It *adds* a person
+entitled to do the work rather than replacing one, so a child whose evening
+frees up is not told they may not do their own chore. And the recap and the
+fairness screen resolve an occurrence through the cover before the rota, because
+crediting the rota for work somebody else agreed to do is not a guess but a
+known-wrong number — and the weeks where somebody carried more than their share
+are the only weeks anybody opens that screen.
+
+The winner among several accepted requests for one square — a real state, since
+a child asks a sibling, hears nothing, and asks the household — is the earliest
+acceptance with the identifier breaking a tie, which is the same rule
+`deduplicatedByOccurrence` uses and for the same reason.
+
 **`MealPlan`** makes the same trade one layer along: meals are indexed by
 day-and-slot in the initialiser, so rendering a week is twenty-one lookups
 rather than seven passes over every meal the household has ever planned.
@@ -148,6 +167,16 @@ aisle is read. `guess(for:)` and `inferred(from:fallback:)` are separate
 because "we do not know" and "we think this is miscellaneous" are different
 answers, and collapsing them is how a guess overwrites a choice somebody made
 by hand.
+
+**Text goes both ways.** `ShoppingListParser` reads a pasted list and
+`ShoppingListText` writes one, and the flat style of the second is deliberately
+in the dialect the first reads, so a list sent to somebody who has the app can
+be pasted rather than retyped. The message style is not: aisle headings would
+come back as items, since nothing distinguishes "Bakery" the section from
+"bakery" the thing somebody wants, and a note in brackets would become part of
+the name it was describing. Two styles rather than one clever format, because
+the two readers want different things and the round trip is only worth
+guaranteeing for one of them.
 
 **Parsing produces drafts, not records.** `ShoppingListParser` reads a pasted
 list and hands back values with no household, no list, and no author, so
@@ -204,9 +233,10 @@ drop the write entirely.
 
 `FamilyHubStore.schemaVersion` is stamped into every export, and
 `HouseholdArchive.migrated()` is the ladder that brings an older file up to the
-current shape. Version 2 added the meal plan and version 3 the family calendar; an older file
-restores as a household with no planned meals and no events, which is not a gap
-to be filled in but the truth about a household that predated the feature.
+current shape. Version 2 added the meal plan, version 3 the family calendar, and version 4 the
+cover requests; an older file restores as a household with no planned meals, no
+events, and no swaps, which is not a gap to be filled in but the truth about a
+household that predated the feature.
 
 Two habits keep that cheap. `HouseholdSnapshot` decodes every collection as
 optional-with-empty rather than required, so a backup written before a feature
@@ -219,9 +249,10 @@ or fail to decode entirely, over a field added later.
 The rule that follows: adding a collection to the snapshot means bumping the
 version, adding a migration case, and testing it against a file with the key
 genuinely absent. Encoding an empty array and reading it back only proves the
-current encoder can read itself. The calendar followed exactly that path and
-the migration step for it is one line in a switch, which is the return on
-having built the ladder at version 1 when it was the identity function.
+current encoder can read itself. The calendar followed exactly that path,
+and so did covering; each migration step is one line in a switch, which is the
+return on having built the ladder at version 1 when it was the identity
+function.
 
 ## What would need to change for sync
 

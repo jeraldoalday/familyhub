@@ -5,11 +5,11 @@ Two weeks, from a tested domain core to something submittable to App Review.
 ## Where things stand
 
 **Day 1 is done, and then some.** The domain and store layers are complete and
-tested: 674 tests covering recurrence, chore rotation, permissions, the points
+tested: 785 tests covering recurrence, chore rotation, permissions, the points
 ledger, shopping lists, streaks, the weekly recap, workload fairness, reminder
-planning, meal planning, the family calendar, household-wide search, the
-command layer, the change feed, and the backup format. `make check` builds, tests, and lints in a few
-seconds.
+planning, meal planning, the family calendar, household-wide search, covering
+each other's chores, the command layer, the change feed, and the backup format.
+`make check` builds, tests, and lints in a few seconds.
 
 Some of that was pulled forward out of later days on purpose. Streaks,
 reminders, and the recap are all decisions about *what the app should say*, and
@@ -28,6 +28,17 @@ means deleting six filters. And an item's aisle is now guessed from its name,
 which turned the aisle grouping from a feature nobody would reach — it needed a
 ten-item menu on the fast path — into one that works by default, including on
 the list the meal plan generates without a person touching it.
+
+Covering a chore was pulled forward on a different argument again: it is the
+first thing a family will ask for once the rota exists, and every decision in it
+is a judgement about what a household means by a favour. Only the person the day
+falls to may ask. An accepted cover adds somebody entitled to do the work rather
+than replacing whoever the rota named, so a child whose evening frees up is not
+told they may not do their own chore. A covered day counts against whoever took
+it on when the fairness screen adds the week up. Those are cheaper to settle
+against a test suite than against four screens that have each already assumed
+something different — and the alternative was shipping a rota that insists Sam
+owes the bins on the one Tuesday somebody else took them out.
 
 The calendar was pulled forward for a different reason. It was the last feature
 the README promised that the domain could not answer a single question about,
@@ -72,9 +83,12 @@ suite first.
 first build. Expect this to be the largest day of the fortnight.
 
 **Day 4 — the rest of the surface.** Shopping, family settings, member
-management, the approvals queue, and the points history. Same pattern as day 3,
-so it should move faster. The meal plan's week grid and the calendar's are the
-stretch items here rather than commitments: `MealPlan` and `FamilyCalendar`
+management, the approvals queue, the points history, and the two rows covering
+needs: an ask on the chore that has one, and an inbox of the asks a person can
+answer — `coverInbox(for:on:)` already answers the second, and sharing a
+shopping list is `ShoppingListText` handed to a `UIActivityViewController`. Same
+pattern as day 3, so it should move faster. The meal plan's week grid and the
+calendar's are the stretch items here rather than commitments: `MealPlan` and `FamilyCalendar`
 already answer everything either grid needs to render — including which of two
 things a child has been double-booked into — so each is a day's view code
 whenever there is a day for it.
@@ -98,9 +112,10 @@ cheaper now than after notifications and widgets depend on the mess.
 **Day 7 — notifications.** `ReminderPlanner` already decides what is worth
 saying and when: the morning digest, the approval queue, the streak about to
 break, the afternoon nudge to whoever is cooking, the Sunday prompt about next
-week's undecided dinners, the appointment that outranks all of them, and the
-per-person daily cap that keeps the channel from being switched off. What is
-left is the platform half — authorisation, translating each `Reminder` into a
+week's undecided dinners, the appointment that outranks all of them, the ask
+from somebody who needs their chore covered today, and the per-person daily cap
+that keeps the channel from being switched off. What is left is the platform
+half — authorisation, translating each `Reminder` into a
 `UNNotificationRequest`, and re-planning on launch and on change. Smaller than
 it was.
 

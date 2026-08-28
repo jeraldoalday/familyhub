@@ -1,8 +1,9 @@
 # FamilyHub — Household Organizer
 
-A shared organizer for the whole household: chores that rotate fairly, a points
+A shared organizer for the whole household: chores that rotate fairly — and that
+somebody else can cover when Tuesday turns out to be football night — a points
 and rewards system that actually motivates kids, shopping lists everyone can add
-to, a meal plan that turns itself into the shopping, and a family calendar — all
+to, a meal plan that turns itself into the shopping, and a family calendar, all
 in one native iOS/iPadOS app.
 
 > **Status:** in active development. The domain and store layers are complete
@@ -46,7 +47,7 @@ The domain and store layers build and test with nothing but the Swift toolchain:
 
 ```bash
 make check      # build + test + lint + release build — the pre-commit gate
-make test       # 674 tests
+make test       # 785 tests
 make format     # reformat in place
 make lint       # the exact formatting check CI runs
 make release    # the optimised build CI also runs
@@ -91,11 +92,12 @@ open FamilyHub.xcodeproj   # added in Milestone 2 — see docs/ROADMAP.md
 Sources/
   FamilyHubCore/
     Models/            Households, members, chores, completions, rewards,
-                       lists, planned meals, calendar events, chore packs
+                       lists, planned meals, calendar events, chore packs,
+                       cover requests
     Scheduling/        Recurrence engine, weekdays, reminder planning
     Rules/             Permissions, points ledger, streaks, insights, meal
                        plan, family calendar, search, aisle guessing,
-                       pasted-list parsing
+                       pasted-list parsing, sharing a list as text
     Support/           Identifiers, validation, errors, the injected clock
   FamilyHubStore/      Store contract, in-memory store, commands, change feed,
                        backup format, demo data
@@ -120,6 +122,8 @@ docs/
 | Working out an item's aisle from its name | ✅ complete, tested |
 | Search across chores, people, meals, lists, and the calendar | ✅ complete, tested |
 | Adding a whole shopping list by pasting it | ✅ complete, tested |
+| Sending a list to somebody who hasn't got the app | ✅ complete, tested |
+| Asking somebody to cover a chore, for one day | ✅ complete, tested |
 | Starter chore packs for a household's first day | ✅ complete, tested |
 | Meal planning, cooking rota, and the shopping it implies | ✅ complete, tested |
 | Family calendar, recurring events, and clash detection | ✅ complete, tested |
