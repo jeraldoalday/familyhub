@@ -12,10 +12,19 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Nothing here writes anything back. Stated rather than left to the repository
+# default, so a token that leaks out of a build step cannot push with it.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Build and test
     runs-on: macos-15
+    # The suite finishes in under a second and the release build in about ten,
+    # so anything past this is hung rather than slow — and a hung job holds a
+    # runner for six hours on the default before anybody finds out.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -57,6 +66,7 @@ jobs:
   format:
     name: Format check
     runs-on: macos-15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 

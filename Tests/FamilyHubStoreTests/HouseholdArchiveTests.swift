@@ -198,6 +198,26 @@ struct HouseholdArchiveTests {
         try archiveData(from: snapshot, version: 3, missingKeys: ["coverRequests"])
     }
 
+    @Test(
+        "Every schema version this build knows has a way back",
+        arguments: 1...FamilyHubStore.schemaVersion
+    )
+    func everyVersionHasAMigration(version: Int) throws {
+        // The ladder is easy to bump and easy to forget to extend: adding a
+        // collection means a new version, and a new version with no case in
+        // the switch throws `unsupportedVersion` at every family whose backup
+        // predates it. The tests above cover what each step does to the
+        // contents; this one covers the ladder having no rungs missing.
+        let archive = HouseholdArchive(
+            snapshot: try demoSnapshot(), exportedAt: clock.now, schemaVersion: version
+        )
+
+        let restored = try HouseholdArchive.decoded(from: try archive.encoded())
+
+        #expect(restored.schemaVersion == FamilyHubStore.schemaVersion)
+        #expect(restored.snapshot.household == archive.snapshot.household)
+    }
+
     @Test("A backup taken before chores could be covered still restores")
     func version3ArchiveMigrates() throws {
         let original = try demoSnapshot()
