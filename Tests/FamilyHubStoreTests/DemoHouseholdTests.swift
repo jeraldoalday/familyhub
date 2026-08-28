@@ -237,6 +237,54 @@ struct DemoHouseholdTests {
         #expect(snapshot.events.contains { !$0.hasReminder })
     }
 
+    @Test("The demo has an ask still waiting and one a sibling took on")
+    func demoHasCoverRequestsInBothStates() throws {
+        // Somebody asking to be let off is the ordinary case rather than the
+        // exception, and a demo where every request is settled shows only half
+        // of what the feature is.
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+
+        #expect(snapshot.coverRequests.count == 2)
+        #expect(snapshot.coverRequests.open.count == 1)
+        #expect(snapshot.coverRequests.contains { $0.resolution.isAccepted })
+    }
+
+    @Test("The ask still waiting is about a day the chore is actually due")
+    func openCoverRequestIsAboutARealOccurrence() throws {
+        // The demo is built around whatever day it is run on, so a hard-coded
+        // Tuesday would be an ask about a chore that is not due.
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+        let engine = snapshot.engine
+        let open = try #require(snapshot.coverRequests.open.first)
+        let chore = try #require(snapshot.chore(open.choreID))
+
+        #expect(chore.occurs(on: open.day, using: engine))
+        #expect(open.day >= clock.today)
+        // Asked by whoever the rota actually named that day.
+        let index = try #require(chore.occurrenceIndex(of: open.day, using: engine))
+        #expect(chore.assignee(forOccurrenceIndex: index) == open.requestedBy)
+    }
+
+    @Test("The covered day moved onto the other child's agenda")
+    func acceptedCoverMovedTheChore() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+        let accepted = try #require(
+            snapshot.coverRequests.first { $0.resolution.isAccepted }
+        )
+        let coverer = try #require(accepted.resolution.coveringMemberID)
+
+        #expect(coverer != accepted.requestedBy)
+        #expect(snapshot.cover(for: accepted.occurrenceKey) == coverer)
+        #expect(
+            snapshot.agenda(for: accepted.day, memberID: coverer)
+                .contains { $0.chore.id == accepted.choreID }
+        )
+        #expect(
+            snapshot.agenda(for: accepted.day, memberID: accepted.requestedBy)
+                .contains { $0.chore.id == accepted.choreID } == false
+        )
+    }
+
     @Test("Every named participant is somebody still in the household")
     func calendarNamesRealPeople() throws {
         let snapshot = try DemoHousehold.snapshot(asOf: clock)

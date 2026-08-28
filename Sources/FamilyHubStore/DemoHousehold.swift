@@ -197,6 +197,62 @@ public enum DemoHousehold {
             )
         )
 
+        // MARK: Cover
+
+        // Somebody asking to be let off is the ordinary case rather than the
+        // exception, so the demo shows both halves of it: one ask still
+        // waiting for an answer, and one from last week that a sibling took
+        // on. The days are found from the rota rather than written down,
+        // because the demo is built around whatever day it is run on and a
+        // hard-coded Tuesday would be a request about a chore that is not due.
+        let engine = RecurrenceEngine(household: household)
+        var coverRequests: [CoverRequest] = []
+
+        let nextBinDay =
+            bins
+            .indexedOccurrences(
+                in: today...(calendar.date(byAdding: .day, value: 14, to: today) ?? today),
+                using: engine,
+                maximum: 1
+            )
+            .first
+        if let nextBinDay, let asker = bins.assignee(forOccurrenceIndex: nextBinDay.index) {
+            coverRequests.append(
+                try CoverRequest(
+                    householdID: household.id,
+                    choreID: bins.id,
+                    day: nextBinDay.day,
+                    requestedBy: asker,
+                    note: "Football doesn't finish until seven",
+                    createdAt: yesterday,
+                    calendar: calendar
+                )
+            )
+        }
+
+        let lastBinDay =
+            bins
+            .indexedOccurrences(in: monthAgo...yesterday, using: engine)
+            .last
+        if let lastBinDay, let asker = bins.assignee(forOccurrenceIndex: lastBinDay.index) {
+            // Whoever the rota did not name that week is the one who covered.
+            let coverer = asker == sam.id ? alex.id : sam.id
+            coverRequests.append(
+                try CoverRequest(
+                    householdID: household.id,
+                    choreID: bins.id,
+                    day: lastBinDay.day,
+                    requestedBy: asker,
+                    askedOf: coverer,
+                    note: "Staying at Gran's",
+                    createdAt: calendar.date(byAdding: .day, value: -1, to: lastBinDay.day)
+                        ?? lastBinDay.day,
+                    calendar: calendar
+                )
+                .accepted(by: coverer, at: lastBinDay.day)
+            )
+        }
+
         // MARK: Rewards
 
         let rewards = [
@@ -400,7 +456,8 @@ public enum DemoHousehold {
             shoppingLists: [groceries, hardware],
             shoppingItems: shoppingItems,
             plannedMeals: plannedMeals,
-            events: calendarEvents + [piano]
+            events: calendarEvents + [piano],
+            coverRequests: coverRequests
         )
     }
 
