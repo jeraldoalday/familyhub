@@ -92,6 +92,13 @@ public protocol HouseholdStore: Sendable {
     /// accumulating a history of dinners it did not have.
     func save(_ meal: PlannedMeal) async throws
 
+    /// Inserts or replaces a cover request.
+    ///
+    /// Written by identifier, which is what makes answering one convergent:
+    /// two siblings accepting at once produce one record with one answer
+    /// rather than two arrangements the household has to reconcile.
+    func save(_ request: CoverRequest) async throws
+
     // MARK: Deleting
 
     /// Permanently removes a chore and its completions.
@@ -157,6 +164,13 @@ extension HouseholdStore {
     public func save(events: [CalendarEvent]) async throws {
         for event in events {
             try await save(event)
+        }
+    }
+
+    /// Saves several cover requests in one go.
+    public func save(coverRequests: [CoverRequest]) async throws {
+        for request in coverRequests {
+            try await save(request)
         }
     }
 }

@@ -159,6 +159,7 @@ struct HouseholdArchiveTests {
         var cleared = snapshot
         if missingKeys.contains("plannedMeals") { cleared.plannedMeals = [] }
         if missingKeys.contains("events") { cleared.events = [] }
+        if missingKeys.contains("coverRequests") { cleared.coverRequests = [] }
         let archive = HouseholdArchive(
             snapshot: cleared, exportedAt: clock.now, schemaVersion: version
         )
@@ -171,15 +172,48 @@ struct HouseholdArchiveTests {
     }
 
     /// An archive as the build that wrote version 1 would have produced it:
-    /// before the meal plan and before the calendar.
+    /// before the meal plan, the calendar, and covering for each other.
     private func version1Data(from snapshot: HouseholdSnapshot) throws -> Data {
-        try archiveData(from: snapshot, version: 1, missingKeys: ["plannedMeals", "events"])
+        try archiveData(
+            from: snapshot,
+            version: 1,
+            missingKeys: ["plannedMeals", "events", "coverRequests"]
+        )
     }
 
     /// An archive as the build that wrote version 2 would have produced it:
     /// with a meal plan, but before the calendar.
     private func version2Data(from snapshot: HouseholdSnapshot) throws -> Data {
-        try archiveData(from: snapshot, version: 2, missingKeys: ["events"])
+        try archiveData(
+            from: snapshot,
+            version: 2,
+            missingKeys: ["events", "coverRequests"]
+        )
+    }
+
+    /// An archive as the build that wrote version 3 would have produced it:
+    /// with a calendar, but from before one person could take a chore off
+    /// another for a day.
+    private func version3Data(from snapshot: HouseholdSnapshot) throws -> Data {
+        try archiveData(from: snapshot, version: 3, missingKeys: ["coverRequests"])
+    }
+
+    @Test("A backup taken before chores could be covered still restores")
+    func version3ArchiveMigrates() throws {
+        let original = try demoSnapshot()
+        let data = try version3Data(from: original)
+        #expect(!(try #require(String(data: data, encoding: .utf8))).contains("coverRequests"))
+
+        let restored = try HouseholdArchive.decoded(from: data)
+
+        #expect(restored.schemaVersion == FamilyHubStore.schemaVersion)
+        // No requests is the truth about that household rather than a gap:
+        // they swapped chores across the kitchen, because there was nowhere
+        // else to do it.
+        #expect(restored.snapshot.coverRequests.isEmpty)
+        #expect(restored.snapshot.household == original.household)
+        #expect(restored.snapshot.events == original.events)
+        #expect(restored.snapshot.completions == original.completions)
     }
 
     @Test("A backup taken before meal planning existed still restores")

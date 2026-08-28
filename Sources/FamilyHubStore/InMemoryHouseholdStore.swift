@@ -23,6 +23,7 @@ public actor InMemoryHouseholdStore: HouseholdStore {
     private var shoppingItemsByID: [Identifier<ShoppingItem>: ShoppingItem] = [:]
     private var plannedMealsByID: [Identifier<PlannedMeal>: PlannedMeal] = [:]
     private var eventsByID: [Identifier<CalendarEvent>: CalendarEvent] = [:]
+    private var coverRequestsByID: [Identifier<CoverRequest>: CoverRequest] = [:]
 
     /// Open change-feed subscriptions, keyed by a token so each can be removed
     /// when its consumer stops iterating.
@@ -59,6 +60,7 @@ public actor InMemoryHouseholdStore: HouseholdStore {
         for item in seed.shoppingItems { shoppingItemsByID[item.id] = item }
         for meal in seed.plannedMeals { plannedMealsByID[meal.id] = meal }
         for event in seed.events { eventsByID[event.id] = event }
+        for request in seed.coverRequests { coverRequestsByID[request.id] = request }
     }
 
     // MARK: Reading
@@ -77,7 +79,8 @@ public actor InMemoryHouseholdStore: HouseholdStore {
             shoppingLists: shoppingListsByID.values.filter { $0.householdID == householdID },
             shoppingItems: shoppingItemsByID.values.filter { $0.householdID == householdID },
             plannedMeals: plannedMealsByID.values.filter { $0.householdID == householdID },
-            events: eventsByID.values.filter { $0.householdID == householdID }
+            events: eventsByID.values.filter { $0.householdID == householdID },
+            coverRequests: coverRequestsByID.values.filter { $0.householdID == householdID }
         )
     }
 
@@ -139,6 +142,11 @@ public actor InMemoryHouseholdStore: HouseholdStore {
         publish(.upserted(event))
     }
 
+    public func save(_ request: CoverRequest) {
+        coverRequestsByID[request.id] = request
+        publish(.upserted(request))
+    }
+
     // MARK: Deleting
 
     public func deleteChore(_ id: Identifier<Chore>) {
@@ -152,6 +160,14 @@ public actor InMemoryHouseholdStore: HouseholdStore {
             publish(
                 .deleted(.completion, completion.id.rawValue, in: completion.householdID)
             )
+        }
+        // Cover requests go with them, for the same reason. An ask about a
+        // chore that no longer exists cannot render a row and cannot be
+        // answered, so leaving it behind would put a permanent unanswerable
+        // question on somebody's list.
+        for (key, request) in coverRequestsByID where request.choreID == id {
+            coverRequestsByID[key] = nil
+            publish(.deleted(.coverRequest, request.id.rawValue, in: request.householdID))
         }
         publish(.deleted(.chore, id.rawValue, in: chore.householdID))
     }
@@ -185,6 +201,7 @@ public actor InMemoryHouseholdStore: HouseholdStore {
         shoppingItemsByID = shoppingItemsByID.filter { $0.value.householdID != id }
         plannedMealsByID = plannedMealsByID.filter { $0.value.householdID != id }
         eventsByID = eventsByID.filter { $0.value.householdID != id }
+        coverRequestsByID = coverRequestsByID.filter { $0.value.householdID != id }
 
         // One change for the whole household rather than one per orphaned
         // record. A subscriber's only reaction is to reload, and reloading a
@@ -249,5 +266,6 @@ public actor InMemoryHouseholdStore: HouseholdStore {
         householdsByID.count + membersByID.count + choresByID.count + completionsByID.count
             + ledgerEntriesByID.count + rewardsByID.count + shoppingListsByID.count
             + shoppingItemsByID.count + plannedMealsByID.count + eventsByID.count
+            + coverRequestsByID.count
     }
 }

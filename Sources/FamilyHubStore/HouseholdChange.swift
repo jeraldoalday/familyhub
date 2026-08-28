@@ -29,6 +29,7 @@ public struct HouseholdChange: Sendable, Hashable {
         case shoppingItem
         case plannedMeal
         case calendarEvent
+        case coverRequest
     }
 
     /// What happened to it.
@@ -80,9 +81,12 @@ public struct HouseholdChange: Sendable, Hashable {
     /// Lets a home screen ignore a shopping item being ticked off in the
     /// kitchen while somebody is looking at today's chores, rather than
     /// rebuilding the whole view for it.
+    /// A cover request belongs here because an accepted one moves a chore from
+    /// one person's list to another's, which is precisely a change to what the
+    /// agenda shows.
     public var affectsAgenda: Bool {
         switch entity {
-        case .household, .member, .chore, .completion: true
+        case .household, .member, .chore, .completion, .coverRequest: true
         case .ledgerEntry, .reward, .shoppingList, .shoppingItem, .plannedMeal, .calendarEvent:
             false
         }
@@ -93,7 +97,7 @@ public struct HouseholdChange: Sendable, Hashable {
         switch entity {
         case .ledgerEntry, .completion, .member: true
         case .household, .chore, .reward, .shoppingList, .shoppingItem, .plannedMeal,
-            .calendarEvent:
+            .calendarEvent, .coverRequest:
             false
         }
     }
@@ -108,7 +112,7 @@ public struct HouseholdChange: Sendable, Hashable {
         switch entity {
         case .plannedMeal, .member, .household: true
         case .chore, .completion, .ledgerEntry, .reward, .shoppingList, .shoppingItem,
-            .calendarEvent:
+            .calendarEvent, .coverRequest:
             false
         }
     }
@@ -124,7 +128,7 @@ public struct HouseholdChange: Sendable, Hashable {
         switch entity {
         case .calendarEvent, .member, .household: true
         case .chore, .completion, .ledgerEntry, .reward, .shoppingList, .shoppingItem,
-            .plannedMeal:
+            .plannedMeal, .coverRequest:
             false
         }
     }
@@ -202,6 +206,15 @@ extension HouseholdChange {
     public static func upserted(_ event: CalendarEvent) -> HouseholdChange {
         HouseholdChange(
             householdID: event.householdID, entity: .calendarEvent, recordID: event.id.rawValue
+        )
+    }
+
+    /// The change recording that `request` was written.
+    public static func upserted(_ request: CoverRequest) -> HouseholdChange {
+        HouseholdChange(
+            householdID: request.householdID,
+            entity: .coverRequest,
+            recordID: request.id.rawValue
         )
     }
 
