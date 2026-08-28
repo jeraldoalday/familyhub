@@ -163,6 +163,12 @@ extension HouseholdArchive {
     ///
     /// Dated with the household's own calendar, because a backup labelled with
     /// the exporting device's timezone is confusing on the one that restores it.
+    ///
+    /// The household's name goes through ``filenameSafe(_:)`` first. Validation
+    /// only trims the ends of a name, so "The\nAldays" is a name a family can
+    /// genuinely have — and a filename with a newline inside it is a file that
+    /// displays as two lines in the Files app and breaks the first script
+    /// anybody points at a folder of backups.
     public func suggestedFilename() -> String {
         let calendar = snapshot.household.calendar()
         let parts = calendar.dateComponents([.year, .month, .day], from: exportedAt)
@@ -172,12 +178,36 @@ extension HouseholdArchive {
             parts.month ?? 0,
             parts.day ?? 0
         )
-        let name =
-            snapshot.household.name.value
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: ":", with: "-")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return "\(name) \(stamp).familyhub.json"
+        return "\(Self.filenameSafe(snapshot.household.name.value)) \(stamp).familyhub.json"
+    }
+
+    /// A household's name reduced to something that can be a filename.
+    ///
+    /// Separators and control characters become spaces rather than being
+    /// deleted, so "Flat 3/B" reads as "Flat 3 B" instead of "Flat 3B" —
+    /// another household's name. Runs of whitespace then collapse, which is
+    /// what keeps that from leaving a double space behind.
+    ///
+    /// A name made entirely of characters this strips would leave nothing to
+    /// call the file, so it falls back to "Household". Validation guarantees a
+    /// non-blank name, not a nameable one.
+    ///
+    /// - Parameter name: The household's name.
+    /// - Returns: A single-line name safe to put in front of the date stamp.
+    static func filenameSafe(_ name: String) -> String {
+        let unusable = CharacterSet(charactersIn: "/\\:")
+            .union(.controlCharacters)
+            .union(.newlines)
+        let cleaned = String(
+            String.UnicodeScalarView(
+                name.unicodeScalars.map { unusable.contains($0) ? " " : $0 }
+            )
+        )
+        let collapsed =
+            cleaned
+            .split(separator: " ", omittingEmptySubsequences: true)
+            .joined(separator: " ")
+        return collapsed.isEmpty ? "Household" : collapsed
     }
 }
 

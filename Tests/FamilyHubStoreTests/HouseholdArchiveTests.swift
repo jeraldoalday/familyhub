@@ -325,8 +325,41 @@ struct HouseholdArchiveTests {
         )
 
         let filename = archive.suggestedFilename()
-        #expect(filename == "Home-Away- 2026 2026-03-02.familyhub.json")
+        #expect(filename == "Home Away 2026 2026-03-02.familyhub.json")
         #expect(!filename.contains("/"))
+    }
+
+    @Test("A filename stays on one line whatever the household is called")
+    func filenameIsOneLine() throws {
+        // Validation trims the ends of a name and no more, so a name with a
+        // newline in the middle of it is one a family can genuinely have — and
+        // a file that displays as two lines in the Files app breaks the first
+        // script anybody points at a folder of backups.
+        let household = try Household(
+            name: "The\nAldays\tHome", timeZone: .gmt, createdAt: clock.now
+        )
+        let archive = HouseholdArchive(
+            snapshot: HouseholdSnapshot(household: household), exportedAt: clock.now
+        )
+
+        let filename = archive.suggestedFilename()
+
+        #expect(filename == "The Aldays Home 2026-03-02.familyhub.json")
+        #expect(filename.components(separatedBy: .newlines).count == 1)
+    }
+
+    @Test("A separator becomes a space rather than disappearing")
+    func separatorsDoNotMergeWords() throws {
+        // Deleting it would turn "Flat 3/B" into "Flat 3B", which is a
+        // different household's name.
+        #expect(HouseholdArchive.filenameSafe("Flat 3/B") == "Flat 3 B")
+        #expect(HouseholdArchive.filenameSafe("A\\B") == "A B")
+    }
+
+    @Test("A name with nothing usable left in it still names the file")
+    func unusableNameFallsBack() throws {
+        // Validation guarantees a non-blank name, not a nameable one.
+        #expect(HouseholdArchive.filenameSafe("//") == "Household")
     }
 
     // MARK: Restoring
