@@ -13,7 +13,7 @@ public enum Permissions {
     /// Whether `role` may perform `action` in general.
     ///
     /// Context-sensitive questions — may *this* member complete *this* chore —
-    /// go through ``authorizeCompletion(of:on:by:household:engine:)``, which
+    /// go through ``authorizeCompletion(of:on:by:engine:coveringMemberID:)``, which
     /// consults this table and then applies the specifics.
     public static func allows(_ action: DomainError.Action, for role: MemberRole) -> Bool {
         switch action {
@@ -112,6 +112,17 @@ extension Permissions {
     /// Whether `member` may mark the given occurrence of `chore` as done, and
     /// which action that would be.
     ///
+    /// - Parameters:
+    ///   - chore: The chore being ticked off.
+    ///   - day: The occurrence's day.
+    ///   - member: The person ticking it off.
+    ///   - engine: The household's recurrence engine, for resolving a rota.
+    ///   - coveringMemberID: Who has taken the occurrence on, when somebody
+    ///     has. An accepted cover *adds* a person entitled to do the work; it
+    ///     does not take the right away from whoever the rota named. A child
+    ///     whose plans freed up and who does their own chore anyway must not be
+    ///     told they are not allowed to, and the points follow whoever actually
+    ///     records it either way.
     /// - Throws: ``DomainError/notPermitted(action:role:)`` when the member's
     ///   role forbids it, or ``DomainError/memberNotInHousehold(_:)`` when they
     ///   have been removed.
@@ -119,14 +130,17 @@ extension Permissions {
         of chore: Chore,
         on day: Date,
         by member: Member,
-        engine: RecurrenceEngine
+        engine: RecurrenceEngine,
+        coveringMemberID: Identifier<Member>? = nil
     ) throws {
         guard member.isActive else {
             throw DomainError.memberNotInHousehold(member.id)
         }
 
         let index = chore.occurrenceIndex(of: day, using: engine) ?? 0
-        let isTheirs = chore.isAssigned(member.id, occurrenceIndex: index)
+        let isTheirs =
+            chore.isAssigned(member.id, occurrenceIndex: index)
+            || coveringMemberID == member.id
 
         // An open chore is anyone's to claim, so completing it is never
         // 'someone else's chore' even though nobody is named on it.
@@ -199,6 +213,116 @@ extension Permissions {
         // chores are better configured not to need approval at all.
         guard completion.completedBy != member.id else {
             throw DomainError.notPermitted(action: .approveCompletion, role: member.role)
+        }
+    }
+}
+
+// MARK: - Cover authorization
+
+extension Permissions {
+
+    /// Whether `member` may ask the household to cover the given occurrence.
+    ///
+    /// Two rules, and the second is the one that matters. Anybody may ask —
+    /// restricting it by role would put the swap back across the kitchen,
+    /// which is where it already happens — but only the person the occurrence
+    /// actually falls to may ask for it, because a favour nobody owed is not a
+    /// favour. That rules out two cases that arrive looking the same: asking to
+    /// be covered for somebody else's turn, and asking to be covered for a
+    /// chore that is open to the household, where nobody is on the hook and
+    /// whoever gets to it first was always the arrangement.
+    ///
+    /// - Parameters:
+    ///   - chore: The chore the request would be about.
+    ///   - day: The occurrence's day.
+    ///   - member: The person asking.
+    ///   - engine: The household's recurrence engine, for resolving a rota.
+    /// - Throws: ``DomainError/memberNotInHousehold(_:)`` when they have left,
+    ///   ``DomainError/notPermitted(action:role:)`` when their role forbids it,
+    ///   or ``DomainError/notAssignedToYou(on:)`` when the day was never theirs.
+    public static func authorizeCoverRequest(
+        of chore: Chore,
+        on day: Date,
+        by member: Member,
+        engine: RecurrenceEngine
+    ) throws {
+        guard member.isActive else {
+            throw DomainError.memberNotInHousehold(member.id)
+        }
+        try check(.requestCover, for: member.role)
+
+        let index = chore.occurrenceIndex(of: day, using: engine) ?? 0
+        guard chore.assignee(forOccurrenceIndex: index) == member.id else {
+            throw DomainError.notAssignedToYou(on: day)
+        }
+    }
+
+    /// Whether `member` may answer a cover request — accept it or turn it down.
+    ///
+    /// One check for both answers, deliberately. Accepting and declining are
+    /// the same permission viewed from two sides: a person who may say yes is
+    /// exactly the person whose no is worth recording, and splitting them would
+    /// eventually let somebody decline a request that was never addressed to
+    /// them and close it under the person who was asked.
+    ///
+    /// - Parameters:
+    ///   - request: The request being answered.
+    ///   - member: The person answering.
+    /// - Throws: ``DomainError/memberNotInHousehold(_:)`` when they have left,
+    ///   ``DomainError/coverAlreadySettled`` when somebody already answered,
+    ///   ``DomainError/cannotCoverForYourself`` when they are the one who
+    ///   asked, or ``DomainError/notPermitted(action:role:)`` when the request
+    ///   named somebody else.
+    public static func authorizeCoverAnswer(
+        to request: CoverRequest,
+        by member: Member
+    ) throws {
+        guard member.isActive else {
+            throw DomainError.memberNotInHousehold(member.id)
+        }
+        try check(.coverForSomeone, for: member.role)
+
+        guard request.resolution.isOpen else {
+            throw DomainError.coverAlreadySettled
+        }
+        // Checked before the addressing rule so the person who asked is told
+        // the true reason. Falling through would tell them their role forbids
+        // it, which is both wrong and unfixable.
+        guard member.id != request.requestedBy else {
+            throw DomainError.cannotCoverForYourself
+        }
+        guard request.isAddressed(to: member.id) else {
+            throw DomainError.notPermitted(action: .coverForSomeone, role: member.role)
+        }
+    }
+
+    /// Whether `member` may take a cover request back.
+    ///
+    /// The person who asked, or any adult. The adult case is not
+    /// administrative tidying: an open request sits on somebody's list asking
+    /// to be answered, and a child who has gone to bed cannot clear one that
+    /// has stopped making sense.
+    ///
+    /// - Parameters:
+    ///   - request: The request being withdrawn.
+    ///   - member: The person withdrawing it.
+    /// - Throws: ``DomainError/memberNotInHousehold(_:)`` when they have left,
+    ///   ``DomainError/coverAlreadySettled`` once somebody has answered — an
+    ///   accepted request is an arrangement between two people, and unpicking
+    ///   it silently hands the chore back to somebody who believes it is no
+    ///   longer theirs — or ``DomainError/notPermitted(action:role:)``.
+    public static func authorizeCoverWithdrawal(
+        of request: CoverRequest,
+        by member: Member
+    ) throws {
+        guard member.isActive else {
+            throw DomainError.memberNotInHousehold(member.id)
+        }
+        guard request.resolution.isOpen else {
+            throw DomainError.coverAlreadySettled
+        }
+        guard member.id == request.requestedBy || member.role.isAdult else {
+            throw DomainError.notPermitted(action: .requestCover, role: member.role)
         }
     }
 }
