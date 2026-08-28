@@ -45,6 +45,9 @@ public struct HouseholdSnapshot: Sendable, Codable {
     /// The family calendar, including events that have been called off.
     public var events: [CalendarEvent]
 
+    /// Requests to swap a single occurrence of a chore, answered or not.
+    public var coverRequests: [CoverRequest]
+
     /// Creates a snapshot.
     public init(
         household: Household,
@@ -56,7 +59,8 @@ public struct HouseholdSnapshot: Sendable, Codable {
         shoppingLists: [ShoppingList] = [],
         shoppingItems: [ShoppingItem] = [],
         plannedMeals: [PlannedMeal] = [],
-        events: [CalendarEvent] = []
+        events: [CalendarEvent] = [],
+        coverRequests: [CoverRequest] = []
     ) {
         self.household = household
         self.members = members
@@ -68,6 +72,7 @@ public struct HouseholdSnapshot: Sendable, Codable {
         self.shoppingItems = shoppingItems
         self.plannedMeals = plannedMeals
         self.events = events
+        self.coverRequests = coverRequests
     }
 
     /// Decodes a snapshot, tolerating collections a previous build never wrote.
@@ -100,6 +105,8 @@ public struct HouseholdSnapshot: Sendable, Codable {
         self.plannedMeals =
             try container.decodeIfPresent([PlannedMeal].self, forKey: .plannedMeals) ?? []
         self.events = try container.decodeIfPresent([CalendarEvent].self, forKey: .events) ?? []
+        self.coverRequests =
+            try container.decodeIfPresent([CoverRequest].self, forKey: .coverRequests) ?? []
     }
 }
 
@@ -149,6 +156,11 @@ extension HouseholdSnapshot {
     /// Finds a calendar event by identifier.
     public func event(_ id: Identifier<CalendarEvent>) -> CalendarEvent? {
         events.first { $0.id == id }
+    }
+
+    /// Finds a cover request by identifier.
+    public func coverRequest(_ id: Identifier<CoverRequest>) -> CoverRequest? {
+        coverRequests.first { $0.id == id }
     }
 
     /// A chore's schedule as a phrase, in this household's week order.
@@ -228,6 +240,16 @@ extension HouseholdSnapshot {
         }
         return found
     }
+
+    /// Requires a cover request, throwing if it is gone.
+    ///
+    /// - Throws: ``DomainError/notFound(entity:id:)``.
+    public func requireCoverRequest(_ id: Identifier<CoverRequest>) throws -> CoverRequest {
+        guard let found = coverRequest(id) else {
+            throw DomainError.notFound(entity: "Cover request", id: id.description)
+        }
+        return found
+    }
 }
 
 // MARK: - The day's agenda
@@ -254,6 +276,24 @@ extension HouseholdSnapshot {
 
         /// The completion record, if it has been done.
         public let completion: ChoreCompletion?
+
+        /// The accepted request that handed this occurrence to somebody else,
+        /// when one exists.
+        public let cover: CoverRequest?
+
+        /// Who took the occurrence on, when somebody did.
+        public let coveringMember: Member?
+
+        /// Whether somebody else has taken this occurrence on.
+        public var isCovered: Bool { coveringMember != nil }
+
+        /// Who the row is actually waiting on: whoever is covering, or the
+        /// person the rota named.
+        ///
+        /// Every screen that shows a chore has to answer this, and answering it
+        /// per screen is how one of them ends up naming the person who asked to
+        /// be let off.
+        public var responsible: Member? { coveringMember ?? assignee }
 
         /// Whether it is done, whether or not the points are approved yet.
         ///
@@ -294,6 +334,23 @@ extension HouseholdSnapshot {
         let engine = self.engine
         let normalizedDay = engine.calendar.startOfDay(for: day)
 
+        // Indexed once, for the same reason the completions are: a household
+        // that swaps chores often accumulates requests, and searching them per
+        // chore would put a second linear scan inside the loop.
+        var coverByOccurrence: [ChoreCompletion.OccurrenceKey: CoverRequest] = [:]
+        for request in coverRequests where request.resolution.isAccepted {
+            let key = request.occurrenceKey
+            guard let existing = coverByOccurrence[key] else {
+                coverByOccurrence[key] = request
+                continue
+            }
+            let incoming = request.resolution.settledAt ?? request.createdAt
+            let held = existing.resolution.settledAt ?? existing.createdAt
+            if incoming < held || (incoming == held && request.id < existing.id) {
+                coverByOccurrence[key] = request
+            }
+        }
+
         // Indexed once rather than searched per chore: a household with a
         // year of history has thousands of completions, and a linear scan
         // inside the loop would make the home screen quadratic.
@@ -317,23 +374,36 @@ extension HouseholdSnapshot {
             else { continue }
             let index = occurrence.index
             let assigneeID = chore.assignee(forOccurrenceIndex: index)
+            let key = ChoreCompletion.OccurrenceKey(choreID: chore.id, day: normalizedDay)
+            let cover = coverByOccurrence[key]
+            let coveringMemberID = cover?.resolution.coveringMemberID
 
             if let memberID {
                 // An unassigned chore stays on everyone's list — it is open for
                 // whoever gets to it first, which is the point of leaving it
                 // unassigned.
-                let isMine = assigneeID == nil || assigneeID == memberID
+                //
+                // A covered one moves wholesale: it appears for whoever took it
+                // on and disappears for the person they took it from. Leaving
+                // it on both lists would make the morning digest count a chore
+                // that has been dealt with, which is the thing the swap was
+                // for — and the person who asked can still tick it off if their
+                // evening frees up, they simply are not being asked to.
+                let isMine =
+                    coveringMemberID.map { $0 == memberID }
+                    ?? (assigneeID == nil || assigneeID == memberID)
                 guard isMine else { continue }
             }
 
-            let key = ChoreCompletion.OccurrenceKey(choreID: chore.id, day: normalizedDay)
             entries.append(
                 AgendaEntry(
                     chore: chore,
                     day: normalizedDay,
                     occurrenceIndex: index,
                     assignee: assigneeID.flatMap(member),
-                    completion: completionsByOccurrence[key]
+                    completion: completionsByOccurrence[key],
+                    cover: cover,
+                    coveringMember: coveringMemberID.flatMap(member)
                 )
             )
         }
@@ -352,5 +422,40 @@ extension HouseholdSnapshot {
     /// Completions across the household still waiting on an adult.
     public var reviewQueue: [ChoreCompletion] {
         completions.awaitingReview
+    }
+}
+
+// MARK: - Cover
+
+extension HouseholdSnapshot {
+    /// Who has taken on a given occurrence, if anybody has.
+    ///
+    /// - Parameter key: The occurrence being asked about.
+    /// - Returns: The member covering it, or `nil`.
+    public func cover(for key: ChoreCompletion.OccurrenceKey) -> Identifier<Member>? {
+        coverRequests.coverFor(key)
+    }
+
+    /// The cover requests `memberID` could answer right now, oldest first.
+    ///
+    /// - Parameters:
+    ///   - memberID: Whose list is being built.
+    ///   - date: The moment being asked about, so a request for a day that has
+    ///     gone by drops off rather than accumulating on a screen forever.
+    /// - Returns: The live requests addressed to them.
+    public func coverInbox(
+        for memberID: Identifier<Member>,
+        on date: Date
+    ) -> [CoverRequest] {
+        coverRequests.addressedTo(memberID, on: date, calendar: household.calendar())
+    }
+
+    /// Every request still waiting for an answer as of `date`, oldest first.
+    ///
+    /// - Parameter date: The moment being asked about.
+    /// - Returns: The household's outstanding asks.
+    public func liveCoverRequests(on date: Date) -> [CoverRequest] {
+        let calendar = household.calendar()
+        return coverRequests.open.filter { $0.isLive(on: date, calendar: calendar) }
     }
 }
