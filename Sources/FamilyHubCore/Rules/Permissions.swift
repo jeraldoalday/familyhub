@@ -40,6 +40,14 @@ public enum Permissions {
         case .completeOwnChore, .redeemReward, .manageShoppingList:
             return true
 
+        // Asking to be covered, and covering for somebody who asked, are open
+        // to everyone including the youngest child. Restricting either would
+        // remove the point: the swap a family already does across the kitchen
+        // would go back to happening across the kitchen, and the app would
+        // carry on insisting that the wrong person owes the bins.
+        case .requestCover, .coverForSomeone:
+            return true
+
         // Ticking off someone else's chore is an adult action, because it moves
         // points into another person's balance.
         case .completeOthersChore:

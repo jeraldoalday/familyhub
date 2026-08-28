@@ -72,6 +72,24 @@ public enum DomainError: Error, Equatable, Sendable {
     /// which one it means rather than making the person work it out.
     case notScheduled(on: Date)
 
+    // MARK: Cover
+
+    /// Somebody answered a cover request that had already been answered.
+    ///
+    /// The ordinary case rather than the exotic one: two siblings both tap
+    /// accept, and the second has to be told rather than silently replacing
+    /// the first.
+    case coverAlreadySettled
+
+    /// A member tried to cover a chore they had asked to be covered for.
+    case cannotCoverForYourself
+
+    /// A member asked to be covered for an occurrence that was never theirs.
+    ///
+    /// Carries the day so the message can name it rather than leaving the
+    /// person to work out which one it means.
+    case notAssignedToYou(on: Date)
+
     // MARK: Lookup
 
     /// The occurrence has already been completed. Completing twice would pay
@@ -97,6 +115,7 @@ extension DomainError {
         case mealTitle
         case mealNotes
         case eventTitle
+        case coverNote
         case points
         case quantity
     }
@@ -139,6 +158,8 @@ extension DomainError {
         case manageShoppingList
         case manageMealPlan
         case manageCalendar
+        case requestCover
+        case coverForSomeone
     }
 }
 
@@ -172,6 +193,12 @@ extension DomainError: LocalizedError {
             return "This chore would never come up: \(reason)."
         case .notScheduled:
             return "That chore isn't due on that day."
+        case .coverAlreadySettled:
+            return "Somebody has already answered that."
+        case .cannotCoverForYourself:
+            return "You asked for this one to be covered, so you can't be the one covering it."
+        case .notAssignedToYou:
+            return "That chore isn't yours that day, so there's nothing to cover."
         case .alreadyCompleted:
             return "This one's already done."
         case .notFound(let entity, _):
@@ -194,6 +221,7 @@ extension DomainError.Field {
         case .mealTitle: "Meal"
         case .mealNotes: "Meal notes"
         case .eventTitle: "Event title"
+        case .coverNote: "Reason"
         case .points: "Points"
         case .quantity: "Quantity"
         }
@@ -219,6 +247,8 @@ extension DomainError.Action {
         case .manageShoppingList: "change shopping lists"
         case .manageMealPlan: "change the meal plan"
         case .manageCalendar: "change the calendar"
+        case .requestCover: "ask somebody to cover a chore"
+        case .coverForSomeone: "cover somebody else's chore"
         }
     }
 }
