@@ -20,7 +20,8 @@ struct ShoppingListTests {
         quantity: Int = 1,
         unit: String? = nil,
         category: ShoppingItem.Category = .other,
-        purchased: Bool = false
+        purchased: Bool = false,
+        addedAt: Date? = nil
     ) throws -> ShoppingItem {
         try ShoppingItem(
             listID: listID,
@@ -30,7 +31,7 @@ struct ShoppingListTests {
             unit: unit,
             category: category,
             addedBy: alex,
-            addedAt: date(2026, 3, 2),
+            addedAt: addedAt ?? date(2026, 3, 2),
             purchase: purchased ? .init(by: alex, at: date(2026, 3, 2, hour: 17)) : nil
         )
     }
@@ -192,6 +193,35 @@ struct ShoppingListTests {
         let grouped = items.groupedByAisle()
         #expect(grouped.map(\.category) == [.produce, .dairy, .household])
         #expect(grouped[0].items.map(\.name.value) == ["Apples", "Bananas"])
+    }
+
+    @Test("Two rows for the same thing keep their order between reads")
+    func duplicateNamesSortStably() throws {
+        // The snapshot's items come out of a dictionary, so the order they
+        // arrive in is not the same twice. Without a tiebreaker beyond the
+        // name, two rows reading "Milk" swap places between reads and the list
+        // looks like it is changing when nothing has.
+        let first = try item("Milk", addedAt: date(2026, 3, 2, hour: 9))
+        let second = try item("milk", addedAt: date(2026, 3, 2, hour: 10))
+        let third = try item("Bread")
+
+        let forwards = [first, second, third].groupedByAisle()
+        let backwards = [second, third, first].groupedByAisle()
+
+        #expect(forwards.first?.items.map(\.id) == [third.id, first.id, second.id])
+        #expect(backwards.first?.items.map(\.id) == forwards.first?.items.map(\.id))
+    }
+
+    @Test("The oldest of two identical rows is the one a repeat lands on")
+    func duplicateMatchIsDeterministic() throws {
+        // Both devices added milk before either synced. Bumping the quantity of
+        // whichever row the collection happened to offer first would put the
+        // count on a different row on each phone.
+        let older = try item("Milk", addedAt: date(2026, 3, 2, hour: 9))
+        let newer = try item("milk", addedAt: date(2026, 3, 2, hour: 10))
+
+        #expect([newer, older].pendingMatch(for: "MILK")?.id == older.id)
+        #expect([older, newer].pendingMatch(for: "milk")?.id == older.id)
     }
 
     @Test("Aisle categories sort in supermarket layout order")

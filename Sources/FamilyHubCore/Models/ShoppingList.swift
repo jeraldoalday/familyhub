@@ -330,6 +330,20 @@ extension ShoppingItem {
     }
 }
 
+// MARK: - Item ordering
+
+extension ShoppingItem {
+    /// The order items appear within an aisle: alphabetical, then by when they
+    /// were added, then by identifier so the sequence never depends on how the
+    /// collection was assembled.
+    public static func displayOrder(_ lhs: ShoppingItem, _ rhs: ShoppingItem) -> Bool {
+        let comparison = lhs.name.value.localizedCaseInsensitiveCompare(rhs.name.value)
+        if comparison != .orderedSame { return comparison == .orderedAscending }
+        if lhs.addedAt != rhs.addedAt { return lhs.addedAt < rhs.addedAt }
+        return lhs.id < rhs.id
+    }
+}
+
 // MARK: - Collections
 
 extension Collection where Element == ShoppingItem {
@@ -341,31 +355,49 @@ extension Collection where Element == ShoppingItem {
 
     /// Items grouped by aisle and sorted into shop order, with each section's
     /// items alphabetical.
+    ///
+    /// Two items whose names compare equal — "Milk" and "milk", the pair two
+    /// people produce by adding the same thing while one phone is offline —
+    /// fall to the moment they were added and then to their identifier. Without
+    /// that tiebreaker the order between them is whatever the sort happened to
+    /// do with the order the store happened to return, and neither is stable:
+    /// the store's snapshot is assembled from a dictionary, so a list that
+    /// reshuffles two rows between reads looks like the shopping changing when
+    /// nothing has.
     public func groupedByAisle() -> [(category: ShoppingItem.Category, items: [ShoppingItem])] {
         Dictionary(grouping: self, by: \.category)
             .sorted { $0.key < $1.key }
             .map { category, items in
                 (
                     category: category,
-                    items: items.sorted {
-                        $0.name.value.localizedCaseInsensitiveCompare($1.name.value)
-                            == .orderedAscending
-                    }
+                    items: items.sorted(by: ShoppingItem.displayOrder)
                 )
             }
     }
 
-    /// The first pending item matching `name`, ignoring case and accents.
+    /// The pending item matching `name`, ignoring case and accents.
     ///
     /// Used before inserting, so adding "milk" to a list that already has
     /// "Milk" bumps the quantity instead of producing two rows that the person
     /// in the shop has to reconcile.
+    ///
+    /// The *earliest* match is returned rather than the first one encountered.
+    /// A household really can hold two pending rows for one thing — both
+    /// devices added it before either synced — and taking whichever the
+    /// collection offered first would mean the quantity landed on a different
+    /// row on each device, since the snapshot's item order comes from a
+    /// dictionary and is not the same twice.
     public func pendingMatch(for name: String) -> ShoppingItem? {
         let key =
             name
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
         guard !key.isEmpty else { return nil }
-        return first { $0.isPending && $0.duplicateKey == key }
+        return
+            filter { $0.isPending && $0.duplicateKey == key }
+            .min { lhs, rhs in
+                if lhs.addedAt != rhs.addedAt { return lhs.addedAt < rhs.addedAt }
+                return lhs.id < rhs.id
+            }
     }
 }
