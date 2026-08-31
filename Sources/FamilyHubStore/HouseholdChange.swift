@@ -25,6 +25,7 @@ public struct HouseholdChange: Sendable, Hashable {
         case completion
         case ledgerEntry
         case reward
+        case redemption
         case shoppingList
         case shoppingItem
         case plannedMeal
@@ -87,17 +88,43 @@ public struct HouseholdChange: Sendable, Hashable {
     public var affectsAgenda: Bool {
         switch entity {
         case .household, .member, .chore, .completion, .coverRequest: true
-        case .ledgerEntry, .reward, .shoppingList, .shoppingItem, .plannedMeal, .calendarEvent:
+        case .ledgerEntry, .reward, .redemption, .shoppingList, .shoppingItem, .plannedMeal,
+            .calendarEvent:
             false
         }
     }
 
     /// Whether this change could alter a point balance.
+    ///
+    /// A redemption is not on this list, and the omission is the interesting
+    /// one. Redeeming and refunding both move points, but they move them by
+    /// writing a ledger entry — the redemption record only says whether the
+    /// reward was ever handed over, which no balance depends on. A rewards
+    /// screen wants ``affectsRewards`` instead.
     public var affectsBalances: Bool {
         switch entity {
         case .ledgerEntry, .completion, .member: true
-        case .household, .chore, .reward, .shoppingList, .shoppingItem, .plannedMeal,
+        case .household, .chore, .reward, .redemption, .shoppingList, .shoppingItem, .plannedMeal,
             .calendarEvent, .coverRequest:
+            false
+        }
+    }
+
+    /// Whether this change could alter what the rewards screen shows.
+    ///
+    /// Wider than the balance, because that screen answers three questions at
+    /// once: what a member has, what they could spend it on, and what the
+    /// household already owes them. A redemption changes the third without
+    /// touching the first, and a parent handing over a film that the screen
+    /// goes on listing as outstanding is the exact failure this feature exists
+    /// to prevent.
+    ///
+    /// A member matters because a redemption names who it belongs to, and the
+    /// household matters because its plan decides whether rewards exist at all.
+    public var affectsRewards: Bool {
+        switch entity {
+        case .reward, .redemption, .ledgerEntry, .completion, .member, .household: true
+        case .chore, .shoppingList, .shoppingItem, .plannedMeal, .calendarEvent, .coverRequest:
             false
         }
     }
@@ -111,8 +138,8 @@ public struct HouseholdChange: Sendable, Hashable {
     public var affectsMealPlan: Bool {
         switch entity {
         case .plannedMeal, .member, .household: true
-        case .chore, .completion, .ledgerEntry, .reward, .shoppingList, .shoppingItem,
-            .calendarEvent, .coverRequest:
+        case .chore, .completion, .ledgerEntry, .reward, .redemption, .shoppingList,
+            .shoppingItem, .calendarEvent, .coverRequest:
             false
         }
     }
@@ -127,8 +154,8 @@ public struct HouseholdChange: Sendable, Hashable {
     public var affectsCalendar: Bool {
         switch entity {
         case .calendarEvent, .member, .household: true
-        case .chore, .completion, .ledgerEntry, .reward, .shoppingList, .shoppingItem,
-            .plannedMeal, .coverRequest:
+        case .chore, .completion, .ledgerEntry, .reward, .redemption, .shoppingList,
+            .shoppingItem, .plannedMeal, .coverRequest:
             false
         }
     }
@@ -178,6 +205,15 @@ extension HouseholdChange {
     public static func upserted(_ reward: Reward) -> HouseholdChange {
         HouseholdChange(
             householdID: reward.householdID, entity: .reward, recordID: reward.id.rawValue
+        )
+    }
+
+    /// The change recording that `redemption` was written.
+    public static func upserted(_ redemption: Redemption) -> HouseholdChange {
+        HouseholdChange(
+            householdID: redemption.householdID,
+            entity: .redemption,
+            recordID: redemption.id.rawValue
         )
     }
 

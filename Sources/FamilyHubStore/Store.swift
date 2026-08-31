@@ -18,11 +18,14 @@ public enum FamilyHubStore {
     /// Bumped whenever the persisted shape changes. Migration steps are keyed
     /// off it, and it is written into every export so a backup taken today can
     /// still be understood by a build shipped a year from now.
-    /// Version 2 added the meal plan, version 3 the family calendar, and
-    /// version 4 the cover requests that let one person take a chore off
-    /// another for a day. Older archives restore unchanged: a household that
-    /// had no meal plan is a household with no planned meals, no calendar is no
-    /// events, and no cover requests is a household that swapped chores across
-    /// the kitchen instead — which is exactly what the migration produces.
-    public static let schemaVersion = 4
+    /// Version 2 added the meal plan, version 3 the family calendar, version 4
+    /// the cover requests that let one person take a chore off another for a
+    /// day, and version 5 the redemption records that say whether a reward
+    /// somebody spent points on was ever actually handed over. Older archives
+    /// restore unchanged: a household that had no meal plan is a household with
+    /// no planned meals, no calendar is no events, no cover requests is a
+    /// household that swapped chores across the kitchen instead, and no
+    /// redemptions is a household whose rewards were settled — or not — outside
+    /// the app. Which is exactly what the migration produces.
+    public static let schemaVersion = 5
 }

@@ -115,11 +115,16 @@ public struct HouseholdArchive: Sendable, Codable {
     /// versions later the argument has held three times: each step is a line in
     /// a switch because the decision it needed was made before it was needed.
     ///
-    /// Version 1 predates the meal plan, version 2 the family calendar, and
-    /// version 3 the cover requests. In every case the missing collection is
-    /// not a gap to be filled in but the truth about that household — there was
-    /// no calendar to have — so migrating is restamping the version rather than
-    /// transforming the contents. That is only true because
+    /// Version 1 predates the meal plan, version 2 the family calendar,
+    /// version 3 the cover requests, and version 4 the redemption records. In
+    /// every case the missing collection is not a gap to be filled in but the
+    /// truth about that household — there was no calendar to have — so
+    /// migrating is restamping the version rather than transforming the
+    /// contents. A version 4 household is not one whose rewards were never
+    /// redeemed, but one whose redemptions were settled, or not, out in the
+    /// world where the app could not see them; inventing records for the ledger
+    /// entries would fill the family's queue with films they watched in
+    /// February and tell them they are owed. That is only true because
     /// ``HouseholdSnapshot`` decodes an absent collection as an empty one; if
     /// it threw instead, every one of these steps would have to rebuild the
     /// snapshot by hand.
@@ -131,7 +136,7 @@ public struct HouseholdArchive: Sendable, Codable {
         switch schemaVersion {
         case FamilyHubStore.schemaVersion:
             return self
-        case 1, 2, 3:
+        case 1, 2, 3, 4:
             return HouseholdArchive(
                 snapshot: snapshot,
                 exportedAt: exportedAt,
@@ -317,6 +322,7 @@ extension HouseholdStore {
         for reward in snapshot.rewards {
             try await save(reward)
         }
+        try await save(redemptions: snapshot.redemptions)
         for list in snapshot.shoppingLists {
             try await save(list)
         }

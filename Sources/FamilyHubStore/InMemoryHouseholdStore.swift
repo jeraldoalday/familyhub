@@ -19,6 +19,7 @@ public actor InMemoryHouseholdStore: HouseholdStore {
     private var completionsByID: [Identifier<ChoreCompletion>: ChoreCompletion] = [:]
     private var ledgerEntriesByID: [Identifier<LedgerEntry>: LedgerEntry] = [:]
     private var rewardsByID: [Identifier<Reward>: Reward] = [:]
+    private var redemptionsByID: [Identifier<Redemption>: Redemption] = [:]
     private var shoppingListsByID: [Identifier<ShoppingList>: ShoppingList] = [:]
     private var shoppingItemsByID: [Identifier<ShoppingItem>: ShoppingItem] = [:]
     private var plannedMealsByID: [Identifier<PlannedMeal>: PlannedMeal] = [:]
@@ -56,6 +57,7 @@ public actor InMemoryHouseholdStore: HouseholdStore {
         for completion in seed.completions { completionsByID[completion.id] = completion }
         for entry in seed.ledgerEntries { ledgerEntriesByID[entry.id] = entry }
         for reward in seed.rewards { rewardsByID[reward.id] = reward }
+        for redemption in seed.redemptions { redemptionsByID[redemption.id] = redemption }
         for list in seed.shoppingLists { shoppingListsByID[list.id] = list }
         for item in seed.shoppingItems { shoppingItemsByID[item.id] = item }
         for meal in seed.plannedMeals { plannedMealsByID[meal.id] = meal }
@@ -76,6 +78,7 @@ public actor InMemoryHouseholdStore: HouseholdStore {
             completions: completionsByID.values.filter { $0.householdID == householdID },
             ledgerEntries: ledgerEntriesByID.values.filter { $0.householdID == householdID },
             rewards: rewardsByID.values.filter { $0.householdID == householdID },
+            redemptions: redemptionsByID.values.filter { $0.householdID == householdID },
             shoppingLists: shoppingListsByID.values.filter { $0.householdID == householdID },
             shoppingItems: shoppingItemsByID.values.filter { $0.householdID == householdID },
             plannedMeals: plannedMealsByID.values.filter { $0.householdID == householdID },
@@ -120,6 +123,11 @@ public actor InMemoryHouseholdStore: HouseholdStore {
     public func save(_ reward: Reward) {
         rewardsByID[reward.id] = reward
         publish(.upserted(reward))
+    }
+
+    public func save(_ redemption: Redemption) {
+        redemptionsByID[redemption.id] = redemption
+        publish(.upserted(redemption))
     }
 
     public func save(_ list: ShoppingList) {
@@ -197,6 +205,7 @@ public actor InMemoryHouseholdStore: HouseholdStore {
         completionsByID = completionsByID.filter { $0.value.householdID != id }
         ledgerEntriesByID = ledgerEntriesByID.filter { $0.value.householdID != id }
         rewardsByID = rewardsByID.filter { $0.value.householdID != id }
+        redemptionsByID = redemptionsByID.filter { $0.value.householdID != id }
         shoppingListsByID = shoppingListsByID.filter { $0.value.householdID != id }
         shoppingItemsByID = shoppingItemsByID.filter { $0.value.householdID != id }
         plannedMealsByID = plannedMealsByID.filter { $0.value.householdID != id }
@@ -264,7 +273,8 @@ public actor InMemoryHouseholdStore: HouseholdStore {
     /// land without reaching into private state.
     public var recordCount: Int {
         householdsByID.count + membersByID.count + choresByID.count + completionsByID.count
-            + ledgerEntriesByID.count + rewardsByID.count + shoppingListsByID.count
+            + ledgerEntriesByID.count + rewardsByID.count + redemptionsByID.count
+            + shoppingListsByID.count
             + shoppingItemsByID.count + plannedMealsByID.count + eventsByID.count
             + coverRequestsByID.count
     }

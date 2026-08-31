@@ -72,6 +72,14 @@ public protocol HouseholdStore: Sendable {
     /// Inserts or replaces a reward.
     func save(_ reward: Reward) async throws
 
+    /// Inserts or replaces a redemption.
+    ///
+    /// Written by identifier like everything else, which is what makes handing
+    /// a reward over convergent: two parents who both confirm the same movie
+    /// night from two devices produce one record with one evening on it rather
+    /// than a household that owes the film twice.
+    func save(_ redemption: Redemption) async throws
+
     /// Inserts or replaces a shopping list.
     func save(_ list: ShoppingList) async throws
 
@@ -171,6 +179,13 @@ extension HouseholdStore {
     public func save(coverRequests: [CoverRequest]) async throws {
         for request in coverRequests {
             try await save(request)
+        }
+    }
+
+    /// Saves several redemptions in one go.
+    public func save(redemptions: [Redemption]) async throws {
+        for redemption in redemptions {
+            try await save(redemption)
         }
     }
 }
