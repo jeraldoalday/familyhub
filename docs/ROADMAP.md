@@ -5,10 +5,11 @@ Two weeks, from a tested domain core to something submittable to App Review.
 ## Where things stand
 
 **Day 1 is done, and then some.** The domain and store layers are complete and
-tested: 785 tests covering recurrence, chore rotation, permissions, the points
+tested: 904 tests covering recurrence, chore rotation, permissions, the points
 ledger, shopping lists, streaks, the weekly recap, workload fairness, reminder
 planning, meal planning, the family calendar, household-wide search, covering
-each other's chores, the command layer, the change feed, and the backup format.
+each other's chores, tracking a redeemed reward until somebody actually hands
+it over, the command layer, the change feed, and the backup format.
 `make check` builds, tests, and lints in a few seconds.
 
 Some of that was pulled forward out of later days on purpose. Streaks,
@@ -39,6 +40,23 @@ it on when the fairness screen adds the week up. Those are cheaper to settle
 against a test suite than against four screens that have each already assumed
 something different — and the alternative was shipping a rota that insists Sam
 owes the bins on the one Tuesday somebody else took them out.
+
+Redemptions were pulled forward on the strength of the same argument as
+covering, one screen along. Spending points was a single ledger line, which
+meant the app treated "Sam has bought a movie night" and "Sam has been taken to
+a movie night" as one event — and in a busy household they are a week apart.
+That gap is where a rewards economy dies: the points go, nothing arrives, and by
+the third time the currency is worth nothing and the rota goes with it. Every
+decision in the fix is a judgement about what a family means by owing somebody
+something. Only an adult may say the film happened, but anybody may put back a
+reward they redeemed by mistake, because a currency you cannot un-spend is one
+children hoard rather than use. A cancelled redemption refunds what it actually
+cost rather than what the reward costs now. A refund is not earning, or a nine
+year old finds the scoreboard in an afternoon. And a promise the household has
+sat on for days is worth a notification, which is the only place in the app
+where the person being nudged is the parent and the person waiting is the child.
+Settling those against a test suite is far cheaper than settling them against a
+rewards screen that has already assumed one of them.
 
 The calendar was pulled forward for a different reason. It was the last feature
 the README promised that the domain could not answer a single question about,
@@ -83,7 +101,10 @@ suite first.
 first build. Expect this to be the largest day of the fortnight.
 
 **Day 4 — the rest of the surface.** Shopping, family settings, member
-management, the approvals queue, the points history, and the two rows covering
+management, the approvals queue, the queue of rewards the household still owes
+— `owedRedemptions` and `overdueRedemptions(on:)` answer it, and
+`handOverReward` and `cancelRedemption` are the two buttons on the row — the
+points history, and the two rows covering
 needs: an ask on the chore that has one, and an inbox of the asks a person can
 answer — `coverInbox(for:on:)` already answers the second, and sharing a
 shopping list is `ShoppingListText` handed to a `UIActivityViewController`. Same
@@ -113,8 +134,9 @@ cheaper now than after notifications and widgets depend on the mess.
 saying and when: the morning digest, the approval queue, the streak about to
 break, the afternoon nudge to whoever is cooking, the Sunday prompt about next
 week's undecided dinners, the appointment that outranks all of them, the ask
-from somebody who needs their chore covered today, and the per-person daily cap
-that keeps the channel from being switched off. What is left is the platform
+from somebody who needs their chore covered today, the reward a child paid for
+nine days ago and is still waiting on, and the per-person daily cap that keeps
+the channel from being switched off. What is left is the platform
 half — authorisation, translating each `Reminder` into a
 `UNNotificationRequest`, and re-planning on launch and on change. Smaller than
 it was.

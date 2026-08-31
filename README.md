@@ -47,7 +47,7 @@ The domain and store layers build and test with nothing but the Swift toolchain:
 
 ```bash
 make check      # build + test + lint + release build — the pre-commit gate
-make test       # 785 tests
+make test       # 904 tests
 make format     # reformat in place
 make lint       # the exact formatting check CI runs
 make release    # the optimised build CI also runs
@@ -92,8 +92,8 @@ open FamilyHub.xcodeproj   # added in Milestone 2 — see docs/ROADMAP.md
 Sources/
   FamilyHubCore/
     Models/            Households, members, chores, completions, rewards,
-                       lists, planned meals, calendar events, chore packs,
-                       cover requests
+                       redemptions, lists, planned meals, calendar events,
+                       chore packs, cover requests
     Scheduling/        Recurrence engine, weekdays, reminder planning
     Rules/             Permissions, points ledger, streaks, insights, meal
                        plan, family calendar, search, aisle guessing,
@@ -118,6 +118,7 @@ docs/
 | Recurrence engine (daily / weekly / monthly) | ✅ complete, tested |
 | Completions, approval queue, conflict resolution | ✅ complete, tested |
 | Points ledger, rewards, redemption rules | ✅ complete, tested |
+| Tracking a redeemed reward until it is actually handed over | ✅ complete, tested |
 | Shopping lists with aisle grouping | ✅ complete, tested |
 | Working out an item's aisle from its name | ✅ complete, tested |
 | Search across chores, people, meals, lists, and the calendar | ✅ complete, tested |

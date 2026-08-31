@@ -27,7 +27,7 @@ and then it stops being faster, for three specific reasons.
 **Testability.** Every rule in this app is about time — recurrence, streaks,
 overdue states, cooldowns. Rules that live on a `@Model` need a container to
 test, which means tests that take seconds instead of microseconds, which in
-practice means tests that do not get written. The 785 tests here run in under
+practice means tests that do not get written. The 904 tests here run in under
 half a second because none of them touch a database.
 
 **Replaceability.** Local-only storage today, iCloud sync later. With rules in
@@ -111,6 +111,19 @@ fairness screen resolve an occurrence through the cover before the rota, because
 crediting the rota for work somebody else agreed to do is not a guess but a
 known-wrong number — and the weeks where somebody carried more than their share
 are the only weeks anybody opens that screen.
+
+**A redeemed reward is a promise, not a transaction.** Spending points used to
+be a single ledger line, which meant the app treated "Sam has bought a movie
+night" and "Sam has been taken to a movie night" as the same event. They are a
+week apart in a busy household, and the gap is where a rewards economy dies: the
+points go, nothing arrives, and by the third time the currency is worth nothing.
+`Redemption` is the second half — owed, then given by an adult or called off and
+refunded. Three consequences follow. The cost is copied onto the record, so
+re-pricing a reward cannot change what an old redemption refunds. The cooldown
+is answered from the records rather than from the ledger, because only a record
+knows whether a redemption was kept. And a refund is a credit that is not
+earning, which the leaderboard and the recap both have to know or a child climbs
+the board by redeeming the dearest reward in the house and cancelling it.
 
 The winner among several accepted requests for one square — a real state, since
 a child asks a sibling, hears nothing, and asks the household — is the earliest
@@ -233,10 +246,14 @@ drop the write entirely.
 
 `FamilyHubStore.schemaVersion` is stamped into every export, and
 `HouseholdArchive.migrated()` is the ladder that brings an older file up to the
-current shape. Version 2 added the meal plan, version 3 the family calendar, and version 4 the
-cover requests; an older file restores as a household with no planned meals, no
-events, and no swaps, which is not a gap to be filled in but the truth about a
-household that predated the feature.
+current shape. Version 2 added the meal plan, version 3 the family calendar,
+version 4 the cover requests, and version 5 the redemption records; an older
+file restores as a household with no planned meals, no events, no swaps, and
+nothing owed, which is not a gap to be filled in but the truth about a household
+that predated the feature. Version 4 is the sharpest case: its ledger plainly
+shows rewards being redeemed, and inventing records from those entries would
+fill a family's queue with films they watched in February and tell them they are
+still owed.
 
 Two habits keep that cheap. `HouseholdSnapshot` decodes every collection as
 optional-with-empty rather than required, so a backup written before a feature
@@ -250,7 +267,8 @@ The rule that follows: adding a collection to the snapshot means bumping the
 version, adding a migration case, and testing it against a file with the key
 genuinely absent. Encoding an empty array and reading it back only proves the
 current encoder can read itself. The calendar followed exactly that path,
-and so did covering; each migration step is one line in a switch, which is the
+and so did covering, and so did redemptions; each migration step is one line in
+a switch, which is the
 return on having built the ladder at version 1 when it was the identity
 function.
 
