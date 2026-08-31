@@ -36,6 +36,9 @@ public struct Reminder: Sendable, Hashable, Identifiable {
         /// Somebody has asked this person to take a chore off them today.
         case coverRequested(requestID: Identifier<CoverRequest>, others: Int)
 
+        /// A reward somebody paid points for has still not been handed over.
+        case rewardOwed(redemptionID: Identifier<Redemption>, others: Int)
+
         /// How disruptive this kind is allowed to be, lowest first.
         ///
         /// Used to decide what survives the per-person daily cap. The ladder is
@@ -55,13 +58,22 @@ public struct Reminder: Sendable, Hashable, Identifiable {
         /// here that another person is waiting on. Unanswered, it is not one
         /// evening that goes wrong but two: the chore does not get done, and
         /// the person who asked finds out too late to do it themselves.
+        ///
+        /// A reward the household owes sits just under the approval queue.
+        /// Both are a child waiting on an adult, and what separates them is
+        /// whether the child can still see a reason for the wait: unapproved
+        /// points are visibly pending, while a reward that was paid for and
+        /// never arrived looks from their side exactly like being lied to. It
+        /// is below approvals only because it is never urgent *today* — by the
+        /// time it is raised at all it has been waiting days.
         public var priority: Int {
             switch self {
-            case .eventSoon: 7
-            case .streakAtRisk: 6
-            case .coverRequested: 5
-            case .cookingTonight: 4
-            case .approvalsWaiting: 3
+            case .eventSoon: 8
+            case .streakAtRisk: 7
+            case .coverRequested: 6
+            case .cookingTonight: 5
+            case .approvalsWaiting: 4
+            case .rewardOwed: 3
             case .birthday: 2
             case .mealPlanGaps: 1
             case .choresDue: 0
@@ -155,6 +167,15 @@ public struct ReminderSchedule: Hashable, Sendable, Codable {
     /// answered by the chore not being done.
     public var sendsCoverRequests: Bool
 
+    /// Whether adults are told about rewards the household still owes.
+    ///
+    /// On by default, and the only reminder here that is about a promise
+    /// rather than a task. A family that turns it off has decided to keep
+    /// track of its own promises, which they are entitled to decide — and this
+    /// switch is what lets them decide it without turning off the channel that
+    /// also carries the dentist appointment.
+    public var sendsRewardReminders: Bool
+
     /// Whether calendar events are allowed to interrupt anybody.
     ///
     /// Only events that asked to are sent regardless — an event's reminder
@@ -173,7 +194,8 @@ public struct ReminderSchedule: Hashable, Sendable, Codable {
         cookingHour: Int = 16,
         sendsMealReminders: Bool = true,
         sendsEventReminders: Bool = true,
-        sendsCoverRequests: Bool = true
+        sendsCoverRequests: Bool = true,
+        sendsRewardReminders: Bool = true
     ) {
         self.morningHour = min(23, max(0, morningHour))
         self.eveningHour = min(23, max(0, eveningHour))
@@ -184,6 +206,7 @@ public struct ReminderSchedule: Hashable, Sendable, Codable {
         self.sendsMealReminders = sendsMealReminders
         self.sendsEventReminders = sendsEventReminders
         self.sendsCoverRequests = sendsCoverRequests
+        self.sendsRewardReminders = sendsRewardReminders
     }
 
     /// Decodes a schedule saved by an older build.
@@ -220,7 +243,10 @@ public struct ReminderSchedule: Hashable, Sendable, Codable {
             ) ?? standard.sendsEventReminders,
             sendsCoverRequests: try container.decodeIfPresent(
                 Bool.self, forKey: .sendsCoverRequests
-            ) ?? standard.sendsCoverRequests
+            ) ?? standard.sendsCoverRequests,
+            sendsRewardReminders: try container.decodeIfPresent(
+                Bool.self, forKey: .sendsRewardReminders
+            ) ?? standard.sendsRewardReminders
         )
     }
 
@@ -331,7 +357,57 @@ public struct ReminderPlanner: Sendable {
 
         planned.append(contentsOf: birthdayReminders(on: day, at: fireDate, calendar: calendar))
         planned.append(contentsOf: approvalReminders(on: day, at: fireDate, calendar: calendar))
+        planned.append(contentsOf: rewardReminders(on: day, at: fireDate, calendar: calendar))
         return planned
+    }
+
+    /// One reminder per adult when a reward has been paid for and not handed
+    /// over for long enough that the household has plainly forgotten.
+    ///
+    /// Sent with the morning digest rather than in the evening, because unlike
+    /// everything else here this one asks for something that takes a day to
+    /// arrange — an evening, a trip, a Saturday. Telling a parent at seven in
+    /// the evening about a film they owe is telling them about tomorrow.
+    ///
+    /// Only overdue promises count. A reward redeemed this morning is not a
+    /// broken promise by tomorrow, and an app that says so is an app nagging a
+    /// parent about something they were always going to do.
+    ///
+    /// One reminder, not one per promise, for the same reason the cover ask is
+    /// one: a parent who owes three rewards and receives three notifications
+    /// answers none of them.
+    private func rewardReminders(
+        on day: Date,
+        at fireDate: Date,
+        calendar: Calendar
+    ) -> [Reminder] {
+        guard schedule.sendsRewardReminders,
+            snapshot.household.tier.includesRewards
+        else { return [] }
+
+        let owing = snapshot.redemptions.overdue(on: day, calendar: calendar)
+        guard let oldest = owing.first,
+            let child = snapshot.member(oldest.memberID),
+            let reward = snapshot.reward(oldest.rewardID)
+        else { return [] }
+
+        return snapshot.activeMembers
+            .filter { Permissions.allows(.handOverReward, for: $0.role) }
+            .map { adult in
+                Reminder(
+                    id: identity(adult.id, day, "reward-owed", calendar: calendar),
+                    recipientID: adult.id,
+                    fireDate: fireDate,
+                    title: "Still owed",
+                    body: Self.rewardOwedBody(
+                        child: child.name.value,
+                        reward: reward.name.value,
+                        days: oldest.daysOwed(on: day, calendar: calendar),
+                        others: owing.count - 1
+                    ),
+                    kind: .rewardOwed(redemptionID: oldest.id, others: owing.count - 1)
+                )
+            }
     }
 
     /// One reminder per adult when completions are waiting.
@@ -783,6 +859,22 @@ extension ReminderPlanner {
             + (others == 1
                 ? " There's 1 more ask waiting."
                 : " There are \(others) more asks waiting.")
+    }
+
+    /// Names the child, the reward, and how long it has been waiting.
+    ///
+    /// The number of days is the part that works. "Sam is waiting for a movie
+    /// night" is a note; "Sam has been waiting nine days for a movie night" is
+    /// the sentence that gets an evening into the diary, and it is also the
+    /// sentence a parent would rather not read twice.
+    static func rewardOwedBody(child: String, reward: String, days: Int, others: Int) -> String {
+        let waited = days == 1 ? "since yesterday" : "for \(days) days"
+        let sentence = "\(child) has been waiting \(waited) for \(reward)."
+        guard others > 0 else { return sentence }
+        return sentence
+            + (others == 1
+                ? " 1 other reward is owed too."
+                : " \(others) other rewards are owed too.")
     }
 
     /// Names the chore and the number, because that is the whole reason this

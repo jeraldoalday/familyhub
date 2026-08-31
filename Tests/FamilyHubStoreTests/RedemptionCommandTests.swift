@@ -230,9 +230,13 @@ struct RedemptionCommandTests {
 
         let snapshot = try await f.store.snapshot(of: f.household.id)
         let history = snapshot.ledger.history(for: f.sam.id)
+        // Looked up rather than taken from the front of the list: the clock is
+        // frozen, so the spend and the refund share a timestamp and the history
+        // orders them by identifier.
+        let refund = history.first { $0.source == .rewardRefunded(f.movieNight.id) }
 
-        #expect(history.first?.source == .rewardRefunded(f.movieNight.id))
-        #expect(history.first?.note == "Cinema was closed")
+        #expect(refund?.note == "Cinema was closed")
+        #expect(refund?.amount == 25)
         #expect(history.contains { $0.source == .rewardRedeemed(f.movieNight.id) })
     }
 
