@@ -293,4 +293,47 @@ struct DemoHouseholdTests {
             #expect(Set(event.participants.namedMemberIDs).isSubset(of: active))
         }
     }
+
+    // MARK: Redemptions
+
+    @Test("The demo opens with a reward the household has forgotten to give")
+    func hasAPromiseOutstanding() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+
+        let owed = snapshot.owedRedemptions
+        #expect(owed.count == 1)
+        #expect(snapshot.overdueRedemptions(on: clock.now).count == 1)
+        // The parent's queue is the screen this feature lives on, and a demo
+        // where it is empty shows a household with nothing to settle.
+        #expect(owed.first?.daysOwed(on: clock.now, calendar: clock.calendar) == 4)
+    }
+
+    @Test("The demo shows all three things that can happen to a redemption")
+    func showsEveryRedemptionState() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+
+        #expect(snapshot.redemptions.count == 3)
+        #expect(snapshot.redemptions.contains { $0.isOwed })
+        #expect(snapshot.redemptions.contains { $0.state.isGiven })
+        #expect(snapshot.redemptions.contains { $0.wasRefunded })
+    }
+
+    @Test("A refunded redemption leaves both halves in the history")
+    func refundReadsAsAPair() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+        let refunded = try #require(snapshot.redemptions.first { $0.wasRefunded })
+        let history = snapshot.ledger.history(for: refunded.memberID)
+
+        #expect(history.contains { $0.source == .rewardRedeemed(refunded.rewardID) })
+        #expect(history.contains { $0.source == .rewardRefunded(refunded.rewardID) })
+    }
+
+    @Test("Every redemption was something its member could actually afford")
+    func nobodyIsOverdrawn() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+
+        for member in snapshot.activeMembers {
+            #expect(snapshot.ledger.balance(for: member.id) >= 0)
+        }
+    }
 }

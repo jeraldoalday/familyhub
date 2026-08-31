@@ -255,40 +255,105 @@ public enum DemoHousehold {
 
         // MARK: Rewards
 
-        let rewards = [
-            try Reward(
+        let movieNight = try Reward(
+            householdID: household.id,
+            name: "Pick movie night",
+            cost: 100,
+            emoji: "🍿",
+            createdAt: monthAgo
+        )
+        let lateNight = try Reward(
+            householdID: household.id,
+            name: "Stay up an hour late",
+            cost: 150,
+            emoji: "🌙",
+            eligibleMemberIDs: [alex.id],
+            cooldownDays: 7,
+            createdAt: monthAgo
+        )
+        let cinema = try Reward(
+            householdID: household.id,
+            name: "Trip to the cinema",
+            cost: 400,
+            emoji: "🎬",
+            remainingRedemptions: 1,
+            createdAt: monthAgo
+        )
+        let skipChore = try Reward(
+            householdID: household.id,
+            name: "Skip one chore",
+            cost: 75,
+            emoji: "🎟️",
+            cooldownDays: 14,
+            createdAt: monthAgo
+        )
+        let rewards = [movieNight, lateNight, cinema, skipChore]
+
+        // MARK: Redemptions
+
+        // All three states, because they are three different rows and a demo
+        // showing only the tidy one shows none of the feature. Sam is waiting
+        // on a promise the household has had four days to keep — which is what
+        // the parent's queue exists to surface. Alex's movie night was
+        // actually delivered. And one of Sam's was called off, so the history
+        // has the shape a refund makes: the spend, and then the points coming
+        // back, rather than a gap where a hundred points used to be.
+        func daysBack(_ days: Int) -> Date {
+            calendar.date(byAdding: .day, value: -days, to: today) ?? today
+        }
+
+        // Earned outside the chore list, and here so that Alex can afford the
+        // movie night below without the demo opening on a balance of zero.
+        ledgerEntries.append(
+            .adjustment(
                 householdID: household.id,
-                name: "Pick movie night",
-                cost: 100,
-                emoji: "🍿",
-                createdAt: monthAgo
-            ),
-            try Reward(
-                householdID: household.id,
-                name: "Stay up an hour late",
-                cost: 150,
-                emoji: "🌙",
-                eligibleMemberIDs: [alex.id],
-                cooldownDays: 7,
-                createdAt: monthAgo
-            ),
-            try Reward(
-                householdID: household.id,
-                name: "Trip to the cinema",
-                cost: 400,
-                emoji: "🎬",
-                remainingRedemptions: 1,
-                createdAt: monthAgo
-            ),
-            try Reward(
-                householdID: household.id,
-                name: "Skip one chore",
-                cost: 75,
-                emoji: "🎟️",
-                cooldownDays: 14,
-                createdAt: monthAgo
-            ),
-        ]
+                memberID: alex.id,
+                amount: 60,
+                by: mary.id,
+                at: daysBack(10),
+                note: "School report"
+            )
+        )
+
+        let alexsMovieNight = try Redemption(
+            householdID: household.id,
+            rewardID: movieNight.id,
+            memberID: alex.id,
+            cost: movieNight.cost,
+            redeemedAt: daysBack(9),
+            note: "Saturday?",
+            state: .given(by: mary.id, at: daysBack(8))
+        )
+        let samsCalledOff = try Redemption(
+            householdID: household.id,
+            rewardID: movieNight.id,
+            memberID: sam.id,
+            cost: movieNight.cost,
+            redeemedAt: daysBack(12),
+            state: .cancelled(by: mary.id, at: daysBack(11))
+        )
+        let samsSkippedChore = try Redemption(
+            householdID: household.id,
+            rewardID: skipChore.id,
+            memberID: sam.id,
+            cost: skipChore.cost,
+            redeemedAt: daysBack(4),
+            note: "Can I skip the bins?"
+        )
+        let redemptions = [alexsMovieNight, samsCalledOff, samsSkippedChore]
+
+        ledgerEntries.append(
+            .spent(on: movieNight, by: alex.id, at: alexsMovieNight.redeemedAt)
+        )
+        ledgerEntries.append(
+            .spent(on: movieNight, by: sam.id, at: samsCalledOff.redeemedAt)
+        )
+        ledgerEntries.append(
+            .refunded(samsCalledOff, at: daysBack(11), note: "Cinema was shut")
+        )
+        ledgerEntries.append(
+            .spent(on: skipChore, by: sam.id, at: samsSkippedChore.redeemedAt)
+        )
 
         // MARK: Shopping
 
@@ -453,6 +518,7 @@ public enum DemoHousehold {
             completions: completions,
             ledgerEntries: ledgerEntries,
             rewards: rewards,
+            redemptions: redemptions,
             shoppingLists: [groceries, hardware],
             shoppingItems: shoppingItems,
             plannedMeals: plannedMeals,
