@@ -33,6 +33,10 @@ public struct HouseholdSnapshot: Sendable, Codable {
     /// Rewards on offer, including withdrawn ones.
     public var rewards: [Reward]
 
+    /// Rewards somebody has spent points on, in every state — owed, handed
+    /// over, and called off.
+    public var redemptions: [Redemption]
+
     /// Shopping lists, including archived ones.
     public var shoppingLists: [ShoppingList]
 
@@ -56,6 +60,7 @@ public struct HouseholdSnapshot: Sendable, Codable {
         completions: [ChoreCompletion] = [],
         ledgerEntries: [LedgerEntry] = [],
         rewards: [Reward] = [],
+        redemptions: [Redemption] = [],
         shoppingLists: [ShoppingList] = [],
         shoppingItems: [ShoppingItem] = [],
         plannedMeals: [PlannedMeal] = [],
@@ -68,6 +73,7 @@ public struct HouseholdSnapshot: Sendable, Codable {
         self.completions = completions
         self.ledgerEntries = ledgerEntries
         self.rewards = rewards
+        self.redemptions = redemptions
         self.shoppingLists = shoppingLists
         self.shoppingItems = shoppingItems
         self.plannedMeals = plannedMeals
@@ -98,6 +104,8 @@ public struct HouseholdSnapshot: Sendable, Codable {
         self.ledgerEntries =
             try container.decodeIfPresent([LedgerEntry].self, forKey: .ledgerEntries) ?? []
         self.rewards = try container.decodeIfPresent([Reward].self, forKey: .rewards) ?? []
+        self.redemptions =
+            try container.decodeIfPresent([Redemption].self, forKey: .redemptions) ?? []
         self.shoppingLists =
             try container.decodeIfPresent([ShoppingList].self, forKey: .shoppingLists) ?? []
         self.shoppingItems =
@@ -151,6 +159,11 @@ extension HouseholdSnapshot {
     /// Finds a reward by identifier.
     public func reward(_ id: Identifier<Reward>) -> Reward? {
         rewards.first { $0.id == id }
+    }
+
+    /// Finds a redemption by identifier.
+    public func redemption(_ id: Identifier<Redemption>) -> Redemption? {
+        redemptions.first { $0.id == id }
     }
 
     /// Finds a calendar event by identifier.
@@ -227,6 +240,16 @@ extension HouseholdSnapshot {
     public func requireReward(_ id: Identifier<Reward>) throws -> Reward {
         guard let found = reward(id) else {
             throw DomainError.notFound(entity: "Reward", id: id.description)
+        }
+        return found
+    }
+
+    /// Requires a redemption, throwing if it is gone.
+    ///
+    /// - Throws: ``DomainError/notFound(entity:id:)``.
+    public func requireRedemption(_ id: Identifier<Redemption>) throws -> Redemption {
+        guard let found = redemption(id) else {
+            throw DomainError.notFound(entity: "Redemption", id: id.description)
         }
         return found
     }
@@ -410,6 +433,81 @@ extension HouseholdSnapshot {
     /// Completions across the household still waiting on an adult.
     public var reviewQueue: [ChoreCompletion] {
         completions.awaitingReview
+    }
+}
+
+// MARK: - Rewards
+
+extension HouseholdSnapshot {
+    /// The rewards the household has been paid for and not yet handed over,
+    /// oldest promise first.
+    ///
+    /// The rewards equivalent of ``reviewQueue``, and the more important of the
+    /// two. A completion nobody approves is a child waiting for points; a
+    /// reward nobody hands over is a child who has already paid for something
+    /// and learned that paying does not work.
+    public var owedRedemptions: [Redemption] { redemptions.owed }
+
+    /// The promises that have gone unkept long enough to be worth chasing.
+    ///
+    /// - Parameter date: The moment being asked about.
+    /// - Returns: The overdue redemptions, oldest first.
+    public func overdueRedemptions(on date: Date) -> [Redemption] {
+        redemptions.overdue(on: date, calendar: household.calendar())
+    }
+
+    /// One member's redemptions, newest first.
+    ///
+    /// - Parameter memberID: Whose history is wanted.
+    /// - Returns: Everything they have redeemed, in any state.
+    public func redemptions(by memberID: Identifier<Member>) -> [Redemption] {
+        redemptions.redeemed(by: memberID)
+    }
+
+    /// What the household still owes one member, in points.
+    ///
+    /// Not the same number as their balance and not a substitute for it: these
+    /// points have already left the balance. It is what a rewards screen shows
+    /// beside it so a child can see that the twenty-five points which vanished
+    /// last Tuesday turned into something, and are still owed.
+    ///
+    /// - Parameter memberID: Whose promises are being totalled.
+    /// - Returns: The value of what they are still waiting for.
+    public func owedPoints(to memberID: Identifier<Member>) -> Int {
+        redemptions.reduce(into: 0) { total, redemption in
+            guard redemption.isOwed, redemption.memberID == memberID else { return }
+            total += redemption.cost
+        }
+    }
+
+    /// Whether a member may redeem a reward right now, and why not when they
+    /// may not.
+    ///
+    /// Assembled here because it is the one question that needs three things at
+    /// once — the reward, the balance, and the member's own redemption history
+    /// — and a screen that gathers them itself is a screen that will eventually
+    /// gather them slightly differently from the command that refuses the tap.
+    ///
+    /// The cooldown is answered from the redemption records rather than from
+    /// the ledger, so a reward somebody redeemed and then changed their mind
+    /// about does not lock them out of it for a week.
+    ///
+    /// - Parameters:
+    ///   - reward: The reward being considered.
+    ///   - memberID: Who wants it.
+    ///   - date: The current moment.
+    /// - Returns: Why it can or cannot be redeemed now.
+    public func availability(
+        of reward: Reward,
+        for memberID: Identifier<Member>,
+        on date: Date
+    ) -> Reward.Availability {
+        reward.availability(
+            forBalance: ledger.balance(for: memberID),
+            lastRedemption: redemptions.lastKeptRedemption(of: reward.id, by: memberID),
+            on: date,
+            calendar: household.calendar()
+        )
     }
 }
 
