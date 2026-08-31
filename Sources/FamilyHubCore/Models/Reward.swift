@@ -181,6 +181,23 @@ extension Reward {
         return copy
     }
 
+    /// Returns a copy with one redemption put back.
+    ///
+    /// The undo of ``consumingRedemption()``, for a redemption that was called
+    /// off. Unlimited rewards are returned unchanged, so cancelling one cannot
+    /// quietly turn it into a reward with a stock of one.
+    ///
+    /// Restocking is not capped at what the reward was first offered with,
+    /// because there is no such number on the record — and inventing one would
+    /// mean a parent who deliberately restocked a sold-out cinema ticket found
+    /// the app arguing with them about it later.
+    public func returningRedemption() -> Reward {
+        guard let remaining = remainingRedemptions else { return self }
+        var copy = self
+        copy.remainingRedemptions = remaining + 1
+        return copy
+    }
+
     /// Returns a copy with a new name.
     public func renamed(to newName: String) throws -> Reward {
         var copy = self

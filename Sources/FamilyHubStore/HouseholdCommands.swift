@@ -582,16 +582,31 @@ public struct HouseholdCommands: Sendable {
 
     // MARK: - Rewards
 
-    /// Redeems a reward, debiting points and consuming stock together.
+    /// Redeems a reward: debits the points, consumes the stock, and records
+    /// what the household now owes.
     ///
+    /// The third of those is the one that makes the feature work. Points and
+    /// stock alone leave the app believing the matter is closed at the moment a
+    /// child has actually bought a promise — a film somebody has to find an
+    /// evening for — and a promise nothing is tracking is a promise a busy
+    /// household forgets. By the third forgotten one the currency is worth
+    /// nothing and the chore rota goes with it.
+    ///
+    /// - Parameters:
+    ///   - rewardID: What they want.
+    ///   - householdID: The household it belongs to.
+    ///   - memberID: Who is redeeming it.
+    ///   - note: Anything they want to say with it — "can we watch it Friday?".
+    /// - Returns: The redemption the household now owes.
     /// - Throws: ``DomainError/insufficientPoints(balance:required:)`` with the
     ///   shortfall attached, or ``DomainError/rewardUnavailable(reason:)``.
     @discardableResult
     public func redeemReward(
         _ rewardID: Identifier<Reward>,
         in householdID: Identifier<Household>,
-        by memberID: Identifier<Member>
-    ) async throws -> LedgerEntry {
+        by memberID: Identifier<Member>,
+        note: String? = nil
+    ) async throws -> Redemption {
         let snapshot = try await store.snapshot(of: householdID)
         let member = try snapshot.requireActiveMember(memberID)
         let reward = try snapshot.requireReward(rewardID)
@@ -605,17 +620,120 @@ public struct HouseholdCommands: Sendable {
         guard reward.isEligible(memberID) else {
             throw DomainError.rewardUnavailable(reason: "it isn't offered to you")
         }
+        // Judged on the records rather than on the ledger, so a reward somebody
+        // redeemed this morning and changed their mind about does not lock them
+        // out of it for the length of its cooldown.
         try snapshot.ledger.authorizeRedemption(
             of: reward,
             by: memberID,
             on: dateProvider.now,
-            calendar: calendar
+            calendar: calendar,
+            redemptions: snapshot.redemptions
         )
 
+        let redemption = try Redemption(
+            householdID: householdID,
+            rewardID: rewardID,
+            memberID: memberID,
+            // Copied off the reward as it stands now, so re-pricing it later
+            // cannot change what this redemption is worth refunding.
+            cost: reward.cost,
+            redeemedAt: dateProvider.now,
+            note: note
+        )
+
+        // The store has no transaction, so the order is chosen for the least
+        // harmful half-write. Debiting first can strand a child who paid and
+        // has no promise to show for it, which an adult can put right with an
+        // adjustment. Recording the promise first can strand a promise nobody
+        // paid for — and cancelling that one would refund points that were
+        // never taken, minting currency out of a crash.
         let entry = LedgerEntry.spent(on: reward, by: memberID, at: dateProvider.now)
         try await store.append(entry)
         try await store.save(reward.consumingRedemption())
-        return entry
+        try await store.save(redemption)
+        return redemption
+    }
+
+    /// Confirms that a redeemed reward actually happened.
+    ///
+    /// The point of the whole record. A queue of promises nobody can close is
+    /// a queue that stops being read, and a reward that was handed over on
+    /// Friday but still sits in a parent's list on Monday teaches them to
+    /// ignore the list rather than the reward.
+    ///
+    /// - Parameters:
+    ///   - redemptionID: The promise being kept.
+    ///   - householdID: The household it belongs to.
+    ///   - actorID: The adult confirming it.
+    /// - Returns: The redemption, now given.
+    /// - Throws: Whatever ``Permissions/authorizeHandOver(of:by:)`` throws.
+    @discardableResult
+    public func handOverReward(
+        _ redemptionID: Identifier<Redemption>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> Redemption {
+        let snapshot = try await store.snapshot(of: householdID)
+        let redemption = try snapshot.requireRedemption(redemptionID)
+        let actor = try snapshot.requireActiveMember(actorID)
+
+        try Permissions.authorizeHandOver(of: redemption, by: actor)
+
+        let given = try redemption.given(by: actorID, at: dateProvider.now)
+        try await store.save(given)
+        return given
+    }
+
+    /// Calls a redemption off, refunds the points, and puts the stock back.
+    ///
+    /// Three writes that have to agree, which is exactly why this is a command
+    /// rather than three taps on a view. A cancellation that refunded without
+    /// restocking would quietly destroy the last cinema ticket; one that
+    /// restocked without refunding would take a child's points for a film that
+    /// never happened.
+    ///
+    /// - Parameters:
+    ///   - redemptionID: The promise being called off.
+    ///   - householdID: The household it belongs to.
+    ///   - actorID: Who is calling it off — the person who redeemed it, or an
+    ///     adult.
+    ///   - reason: Why, in their words. Carried onto the refund so the child's
+    ///     history says "cinema was closed" rather than showing points that
+    ///     moved for no stated reason.
+    /// - Returns: The redemption, now cancelled.
+    /// - Throws: Whatever ``Permissions/authorizeCancellation(of:by:)`` throws.
+    @discardableResult
+    public func cancelRedemption(
+        _ redemptionID: Identifier<Redemption>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>,
+        reason: String? = nil
+    ) async throws -> Redemption {
+        let snapshot = try await store.snapshot(of: householdID)
+        let redemption = try snapshot.requireRedemption(redemptionID)
+        let actor = try snapshot.requireActiveMember(actorID)
+
+        try Permissions.authorizeCancellation(of: redemption, by: actor)
+
+        // The record is settled before the points move, and that order is not
+        // arbitrary: it is what stops a retry after a half-written cancellation
+        // refunding the same redemption twice. A record that says cancelled
+        // with the points still gone is visible and fixable; a child paid twice
+        // over for a film nobody watched is not.
+        let cancelled = try redemption.cancelled(by: actorID, at: dateProvider.now)
+        try await store.save(cancelled)
+        try await store.append(
+            LedgerEntry.refunded(cancelled, at: dateProvider.now, note: reason)
+        )
+
+        // The reward may have been deleted from under the redemption, which is
+        // not a reason to refuse the refund — the points matter more than the
+        // stock count of something that no longer exists.
+        if let reward = snapshot.reward(redemption.rewardID) {
+            try await store.save(reward.returningRedemption())
+        }
+        return cancelled
     }
 
     /// Grants or removes points by hand.
