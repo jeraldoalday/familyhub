@@ -180,18 +180,34 @@ public struct PointsLedger: Sendable {
 
     /// Checks that `memberID` can afford `reward` and may have it now.
     ///
+    /// - Parameters:
+    ///   - reward: What they want.
+    ///   - memberID: Who wants it.
+    ///   - date: The current moment.
+    ///   - calendar: The household calendar.
+    ///   - redemptions: The household's redemption records, when the caller
+    ///     holds them. They are the exact answer to the cooldown question,
+    ///     because a record knows whether it was refunded and the ledger can
+    ///     only infer it. Left empty — which is what a household restored from
+    ///     a backup taken before redemptions were records looks like — the
+    ///     cooldown falls back to ``lastRedemption(of:by:)``.
     /// - Throws: ``DomainError/insufficientPoints(balance:required:)`` carrying
     ///   the shortfall, or ``DomainError/rewardUnavailable(reason:)``.
     public func authorizeRedemption(
         of reward: Reward,
         by memberID: Identifier<Member>,
         on date: Date,
-        calendar: Calendar
+        calendar: Calendar,
+        redemptions: some Collection<Redemption> = EmptyCollection<Redemption>()
     ) throws {
         let currentBalance = balance(for: memberID)
+        let lastKept =
+            redemptions.isEmpty
+            ? lastRedemption(of: reward, by: memberID)
+            : redemptions.lastKeptRedemption(of: reward.id, by: memberID)
         let availability = reward.availability(
             forBalance: currentBalance,
-            lastRedemption: lastRedemption(of: reward, by: memberID),
+            lastRedemption: lastKept,
             on: date,
             calendar: calendar
         )
@@ -212,14 +228,45 @@ public struct PointsLedger: Sendable {
         }
     }
 
-    /// When `memberID` last redeemed `reward`, if ever.
+    /// When `memberID` last redeemed `reward` and kept it, if ever.
+    ///
+    /// Refunds are netted off rather than ignored. A cooldown exists to stop a
+    /// child redeeming "skip a chore" seven days running; a redemption they
+    /// changed their mind about ten minutes later, and were given the points
+    /// back for, is not one of those seven days and must not lock them out for
+    /// a week.
+    ///
+    /// The pairing walks backwards and cancels each refund against the next
+    /// older redemption of the same reward. That is a reconstruction rather
+    /// than a reading: the ledger records that a refund happened, not which
+    /// redemption it belonged to, and two of each in flight at once can only be
+    /// matched by assumption. Callers holding the redemption records themselves
+    /// should ask them instead — see
+    /// ``Swift/Collection/lastKeptRedemption(of:by:)`` — and pass the answer to
+    /// ``authorizeRedemption(of:by:on:calendar:lastRedemption:)``. This is the
+    /// answer for the household whose records predate them.
+    ///
+    /// - Parameters:
+    ///   - reward: The reward being asked about.
+    ///   - memberID: Who is asking for it again.
+    /// - Returns: When they last redeemed it without being refunded.
     public func lastRedemption(
         of reward: Reward,
         by memberID: Identifier<Member>
     ) -> Date? {
-        entries.last { entry in
-            entry.memberID == memberID && entry.source == .rewardRedeemed(reward.id)
-        }?.occurredAt
+        var refundsToAccountFor = 0
+        for entry in entries.reversed() where entry.memberID == memberID {
+            if entry.source == .rewardRefunded(reward.id) {
+                refundsToAccountFor += 1
+            } else if entry.source == .rewardRedeemed(reward.id) {
+                guard refundsToAccountFor == 0 else {
+                    refundsToAccountFor -= 1
+                    continue
+                }
+                return entry.occurredAt
+            }
+        }
+        return nil
     }
 
     private static let dayFormatter: DateFormatter = {

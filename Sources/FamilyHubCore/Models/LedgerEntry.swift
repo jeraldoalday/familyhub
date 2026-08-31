@@ -78,6 +78,16 @@ extension LedgerEntry {
         /// A reward was redeemed.
         case rewardRedeemed(Identifier<Reward>)
 
+        /// A redemption was called off and the points given back.
+        ///
+        /// An entry rather than an erasure, for the same reason sending a
+        /// chore back is one. A child whose balance goes up by twenty-five
+        /// points needs to be able to see that it went up because the film
+        /// never happened — and a household that could quietly delete the
+        /// original line would be a household where a parent can take a
+        /// reward back and leave no trace of having done it.
+        case rewardRefunded(Identifier<Reward>)
+
         /// An adult granted or removed points by hand.
         case adjustment(by: Identifier<Member>)
 
@@ -93,6 +103,7 @@ extension LedgerEntry {
             case .choreCompleted: "Chore"
             case .choreSentBack: "Sent back"
             case .rewardRedeemed: "Reward"
+            case .rewardRefunded: "Refund"
             case .adjustment: "Adjustment"
             case .bonus: "Bonus"
             case .reset: "Reset"
@@ -105,6 +116,7 @@ extension LedgerEntry {
             case .choreCompleted: "checkmark.circle.fill"
             case .choreSentBack: "arrow.uturn.backward.circle.fill"
             case .rewardRedeemed: "gift.fill"
+            case .rewardRefunded: "gift.circle"
             case .adjustment: "slider.horizontal.3"
             case .bonus: "star.fill"
             case .reset: "arrow.counterclockwise"
@@ -119,7 +131,7 @@ extension LedgerEntry {
             // it as one so a child can see the change was deliberate rather
             // than a bug — which is the entire reason this flag exists.
             case .adjustment, .bonus, .reset, .choreSentBack: true
-            case .choreCompleted, .rewardRedeemed: false
+            case .choreCompleted, .rewardRedeemed, .rewardRefunded: false
             }
         }
     }
@@ -189,6 +201,37 @@ extension LedgerEntry {
             source: .rewardRedeemed(reward.id),
             occurredAt: date,
             note: note ?? reward.name.value
+        )
+    }
+
+    /// The entry giving back what a redemption took, when it is called off.
+    ///
+    /// Reads the amount off the redemption rather than off the reward, which
+    /// is the whole reason the redemption carries a cost of its own: a parent
+    /// who re-prices "30 minutes of screen time" from ten points to twenty
+    /// must not thereby turn a refund into a profit.
+    ///
+    /// Stamped with the moment of the cancellation rather than of the
+    /// redemption, so the history reads in the order the family experienced
+    /// it — the points went, and then later they came back.
+    ///
+    /// - Parameters:
+    ///   - redemption: The redemption being called off.
+    ///   - date: When it was called off.
+    ///   - note: The reason, if one was given.
+    /// - Returns: The refunding entry.
+    public static func refunded(
+        _ redemption: Redemption,
+        at date: Date,
+        note: String? = nil
+    ) -> LedgerEntry {
+        LedgerEntry(
+            householdID: redemption.householdID,
+            memberID: redemption.memberID,
+            amount: abs(redemption.cost),
+            source: .rewardRefunded(redemption.rewardID),
+            occurredAt: date,
+            note: note
         )
     }
 
