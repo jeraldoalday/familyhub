@@ -72,9 +72,13 @@ public struct PointsLedger: Sendable {
     /// This is the number a leaderboard should rank on. Ranking on the current
     /// balance rewards hoarding and punishes a child for spending what they
     /// earned, which turns the reward system into a reason not to use it.
+    ///
+    /// A refund is a credit and is not earning. Counting one would let a child
+    /// climb the board by redeeming an expensive reward and cancelling it,
+    /// which is a scoreboard a nine year old finds in an afternoon.
     public func totalEarned(by memberID: Identifier<Member>) -> Int {
         entries.reduce(into: 0) { total, entry in
-            guard entry.memberID == memberID, entry.amount > 0 else { return }
+            guard entry.memberID == memberID, entry.isEarned else { return }
             total += entry.amount
         }
     }
@@ -103,13 +107,17 @@ public struct PointsLedger: Sendable {
 
     /// Points earned by one member within a range — the number on the weekly
     /// recap card.
+    ///
+    /// Refunds are excluded on the same argument as ``totalEarned(by:)``: a
+    /// week in which a child was given back the points for a promise the
+    /// household failed to keep was not a week they earned more.
     public func earned(
         by memberID: Identifier<Member>,
         in range: ClosedRange<Date>
     ) -> Int {
         entries.reduce(into: 0) { total, entry in
             guard entry.memberID == memberID,
-                entry.amount > 0,
+                entry.isEarned,
                 range.contains(entry.occurredAt)
             else { return }
             total += entry.amount

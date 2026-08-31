@@ -261,6 +261,23 @@ extension LedgerEntry {
     /// Whether this entry adds to a balance.
     public var isCredit: Bool { amount > 0 }
 
+    /// Whether this entry is points the member actually earned.
+    ///
+    /// Narrower than ``isCredit``, and the difference is a refund. Getting back
+    /// what you paid for a film nobody took you to is not work done, and
+    /// counting it as earning would put a child up the leaderboard for
+    /// redeeming a reward and cancelling it — repeatedly, and by a hundred
+    /// points a time if the reward is dear enough.
+    ///
+    /// An adult's bonus and adjustment do count. They are the household saying
+    /// somebody deserved points, which is exactly what earning is here; the
+    /// refund is the household saying it took some by mistake.
+    public var isEarned: Bool {
+        guard isCredit else { return false }
+        if case .rewardRefunded = source { return false }
+        return true
+    }
+
     /// The amount formatted for display, signed: "+10", "−25".
     ///
     /// Uses a true minus sign rather than a hyphen, because in the tabular

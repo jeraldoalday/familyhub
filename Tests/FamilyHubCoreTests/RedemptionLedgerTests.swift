@@ -265,4 +265,57 @@ struct RedemptionLedgerTests {
             )
         }
     }
+
+    // MARK: Earning
+
+    @Test("A refund is a credit but is not something anybody earned")
+    func refundIsNotEarning() throws {
+        let reward = try makeReward(cost: 100)
+        let redemption = try makeRedemption(of: reward, cost: 100)
+        let refund = LedgerEntry.refunded(redemption, at: clock.now)
+
+        #expect(refund.isCredit)
+        #expect(!refund.isEarned)
+    }
+
+    @Test("Redeeming an expensive reward and cancelling it does not climb the board")
+    func refundsDoNotInflateTotals() throws {
+        let reward = try makeReward(cost: 100)
+        let ledger = PointsLedger(
+            entries: [
+                LedgerEntry.adjustment(
+                    householdID: householdID, memberID: sam, amount: 100,
+                    by: mary, at: clock.advanced(byDays: -3).now
+                )
+            ]
+                + (try entries(
+                    redeeming: reward,
+                    on: clock.advanced(byDays: -2).now,
+                    refundedOn: clock.advanced(byDays: -1).now,
+                    redemptionCost: 100
+                ))
+        )
+
+        // The points came back, so the balance is untouched — but nothing was
+        // earned by the round trip, and a child who repeats it must not
+        // overtake a sibling who did the chores.
+        #expect(ledger.balance(for: sam) == 100)
+        #expect(ledger.totalEarned(by: sam) == 100)
+        #expect(
+            ledger.earned(
+                by: sam,
+                in: clock.advanced(byDays: -4).now...clock.now
+            ) == 100)
+    }
+
+    @Test("An adult's bonus is still earning, because the household said so")
+    func bonusesStillCount() throws {
+        let bonus = LedgerEntry.adjustment(
+            householdID: householdID, memberID: sam, amount: 20,
+            by: mary, at: clock.now, note: "Helped carry the shopping"
+        )
+
+        #expect(bonus.isEarned)
+        #expect(PointsLedger(entries: [bonus]).totalEarned(by: sam) == 20)
+    }
 }

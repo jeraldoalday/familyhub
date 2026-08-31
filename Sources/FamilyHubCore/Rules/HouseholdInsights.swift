@@ -160,7 +160,10 @@ public struct HouseholdInsights: Sendable {
         }
 
         let entries = snapshot.ledger.entries(in: firstDay...endOfDay(lastDay))
-        let pointsEarned = entries.filter(\.isCredit).reduce(0) { $0 + $1.amount }
+        // Earned rather than credited: a refund puts points back into a
+        // balance without anybody having done anything, and a recap that
+        // counted it would congratulate a household for a promise it broke.
+        let pointsEarned = entries.filter(\.isEarned).reduce(0) { $0 + $1.amount }
 
         return Recap(
             range: range,
