@@ -31,6 +31,16 @@ public enum Permissions {
         case .createReward, .adjustPoints, .approveCompletion:
             return role.isAdult
 
+        // Confirming that a reward actually happened is an adult's word, for
+        // the same reason approving a chore is: a child who could mark their
+        // own movie night as given is a child who has bought nothing, and the
+        // queue of things the household still owes — the only thing standing
+        // between this feature and a currency worth nothing — would empty
+        // itself. Cancelling somebody *else's* is an adult action on the same
+        // grounds; cancelling your own is not, and is allowed below.
+        case .handOverReward, .cancelRedemption:
+            return role.isAdult
+
         // Creating chores is open to teens, who are old enough to add their own
         // commitments and are more likely to keep to a schedule they wrote.
         case .createChore, .manageCalendar, .manageMealPlan:
@@ -324,5 +334,76 @@ extension Permissions {
         guard member.id == request.requestedBy || member.role.isAdult else {
             throw DomainError.notPermitted(action: .requestCover, role: member.role)
         }
+    }
+}
+
+// MARK: - Redemption authorization
+
+extension Permissions {
+
+    /// Whether `member` may confirm that a redeemed reward actually happened.
+    ///
+    /// Adults only, and their own redemptions included. That is the one place
+    /// this rule departs from the approval rule it otherwise mirrors, and the
+    /// departure is deliberate: approving your own chore pays you points, while
+    /// marking your own reward given only records something that is either true
+    /// or not. Forbidding it would leave the single parent who redeemed a night
+    /// off cooking with a promise the app will insist is outstanding forever.
+    ///
+    /// - Parameters:
+    ///   - redemption: The redemption being handed over.
+    ///   - member: The person confirming it.
+    /// - Throws: ``DomainError/memberNotInHousehold(_:)`` when they have left,
+    ///   ``DomainError/redemptionAlreadySettled`` when it has already been
+    ///   given or called off, or ``DomainError/notPermitted(action:role:)``.
+    public static func authorizeHandOver(
+        of redemption: Redemption,
+        by member: Member
+    ) throws {
+        guard member.isActive else {
+            throw DomainError.memberNotInHousehold(member.id)
+        }
+        try check(.handOverReward, for: member.role)
+        guard redemption.isOwed else {
+            throw DomainError.redemptionAlreadySettled
+        }
+    }
+
+    /// Whether `member` may call a redemption off and send the points back.
+    ///
+    /// The person who redeemed it, or any adult. The first half is what makes
+    /// the rewards screen safe to browse: a child who spends thirty points on
+    /// the wrong thing by mistake can put it back themselves, and a currency
+    /// you cannot un-spend is one children learn to hoard rather than use.
+    ///
+    /// The adult half is not administrative tidying either. Some promises
+    /// genuinely cannot be kept — the cinema closed, the reward was withdrawn —
+    /// and the alternative to a parent cancelling is a row that sits in the
+    /// queue accusing the household forever.
+    ///
+    /// - Parameters:
+    ///   - redemption: The redemption being called off.
+    ///   - member: The person calling it off.
+    /// - Throws: ``DomainError/memberNotInHousehold(_:)`` when they have left,
+    ///   ``DomainError/redemptionAlreadySettled`` once it has been given — a
+    ///   reward that has happened cannot be un-happened, and refunding one
+    ///   would let a household watch the film and keep the points — or
+    ///   ``DomainError/notPermitted(action:role:)``.
+    public static func authorizeCancellation(
+        of redemption: Redemption,
+        by member: Member
+    ) throws {
+        guard member.isActive else {
+            throw DomainError.memberNotInHousehold(member.id)
+        }
+        // Checked before the ownership rule so the person who redeemed it is
+        // told the true reason. Falling through would tell a child their role
+        // forbids cancelling a film they have already watched, which is both
+        // wrong and unfixable.
+        guard redemption.isOwed else {
+            throw DomainError.redemptionAlreadySettled
+        }
+        guard member.id != redemption.memberID else { return }
+        try check(.cancelRedemption, for: member.role)
     }
 }

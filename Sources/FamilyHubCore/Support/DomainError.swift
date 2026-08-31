@@ -164,6 +164,8 @@ extension DomainError {
         case adjustPoints
         case createReward
         case redeemReward
+        case handOverReward
+        case cancelRedemption
         case manageShoppingList
         case manageMealPlan
         case manageCalendar
@@ -256,6 +258,8 @@ extension DomainError.Action {
         case .adjustPoints: "change points"
         case .createReward: "create rewards"
         case .redeemReward: "redeem rewards"
+        case .handOverReward: "hand a reward over"
+        case .cancelRedemption: "cancel somebody else's reward"
         case .manageShoppingList: "change shopping lists"
         case .manageMealPlan: "change the meal plan"
         case .manageCalendar: "change the calendar"
