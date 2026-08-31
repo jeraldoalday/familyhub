@@ -503,11 +503,29 @@ extension HouseholdSnapshot {
         on date: Date
     ) -> Reward.Availability {
         reward.availability(
-            forBalance: ledger.balance(for: memberID),
+            forBalance: balance(of: memberID),
             lastRedemption: redemptions.lastKeptRedemption(of: reward.id, by: memberID),
             on: date,
             calendar: household.calendar()
         )
+    }
+
+    /// One member's balance, summed rather than read off a sorted ledger.
+    ///
+    /// The same number ``PointsLedger/balance(for:)`` gives. The difference is
+    /// what it costs to ask: building a ``PointsLedger`` sorts every entry the
+    /// household has ever produced, which is exactly right for a history screen
+    /// that has to render them in order and exactly wrong for a rewards grid
+    /// asking this question once per reward per member. A sum does not care
+    /// what order it is taken in.
+    ///
+    /// - Parameter memberID: Whose balance is wanted.
+    /// - Returns: What they have to spend.
+    private func balance(of memberID: Identifier<Member>) -> Int {
+        ledgerEntries.reduce(into: 0) { total, entry in
+            guard entry.memberID == memberID else { return }
+            total += entry.amount
+        }
     }
 }
 

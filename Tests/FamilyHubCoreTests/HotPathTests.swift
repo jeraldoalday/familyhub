@@ -238,6 +238,67 @@ struct HotPathTests {
         return BusyHousehold(snapshot: snapshot, today: busy.today, members: members)
     }
 
+    /// Two years of redemptions against a shelf of rewards, most of them handed
+    /// over and some still owed.
+    ///
+    /// A household that has actually used its reward economy, which is the only
+    /// history that tells you whether asking "can this child afford this
+    /// reward" is a sum or a sort of everything they have ever done.
+    private func withRedemptions(
+        _ busy: BusyHousehold, historyDays: Int = 730
+    ) throws -> BusyHousehold {
+        var snapshot = busy.snapshot
+        let members = busy.members
+        let start =
+            calendar.date(byAdding: .day, value: -historyDays, to: busy.today)
+            ?? busy.today
+
+        let rewards = try (0..<8).map { index in
+            try Reward(
+                householdID: snapshot.household.id,
+                name: "Reward \(index)",
+                cost: 10 + index * 5,
+                // Half of them cool down, because a cooldown is what forces the
+                // availability check to consult the redemption history rather
+                // than just the balance.
+                cooldownDays: index.isMultiple(of: 2) ? 7 : nil,
+                createdAt: start
+            )
+        }
+
+        var redemptions: [Redemption] = []
+        var entries = snapshot.ledgerEntries
+        for offset in stride(from: -historyDays, through: -1, by: 1) {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: busy.today) else {
+                continue
+            }
+            let index = offset + historyDays
+            let member = members[index % members.count]
+            let reward = rewards[index % rewards.count]
+            redemptions.append(
+                try Redemption(
+                    householdID: snapshot.household.id,
+                    rewardID: reward.id,
+                    memberID: member.id,
+                    cost: reward.cost,
+                    redeemedAt: day,
+                    // A few left outstanding, so the queue and the overdue
+                    // filter have something to walk past rather than an empty
+                    // list that is fast for the wrong reason.
+                    state: index.isMultiple(of: 9)
+                        ? .owed
+                        : .given(by: members[0].id, at: day)
+                )
+            )
+            entries.append(.spent(on: reward, by: member.id, at: day))
+        }
+
+        snapshot.rewards = rewards
+        snapshot.redemptions = redemptions
+        snapshot.ledgerEntries = entries
+        return BusyHousehold(snapshot: snapshot, today: busy.today, members: members)
+    }
+
     /// How long `work` took.
     private func duration(of work: () throws -> Void) rethrows -> TimeInterval {
         let started = Date()
@@ -555,5 +616,63 @@ struct HotPathTests {
                 familyCalendar.occurrences(on: day.day).map(\.id) == day.occurrences.map(\.id)
             )
         }
+    }
+
+    @Test("The rewards screen stays fast on two years of redemptions")
+    func rewardsScreenIsFastOnALongHistory() throws {
+        let busy = try withRedemptions(try makeBusyHousehold(choreCount: 4))
+        var rows = 0
+
+        let elapsed = duration {
+            for member in busy.members {
+                _ = busy.snapshot.owedPoints(to: member.id)
+                for reward in busy.snapshot.rewards {
+                    _ = busy.snapshot.availability(
+                        of: reward, for: member.id, on: busy.today
+                    )
+                    rows += 1
+                }
+            }
+            rows += busy.snapshot.owedRedemptions.count
+        }
+
+        #expect(rows > 0)
+        #expect(elapsed < 2.0)
+    }
+
+    @Test("The summed balance is the balance the ledger reports")
+    func summedBalanceMatchesTheLedger() throws {
+        // Speed is only worth having if the answer is unchanged: the rewards
+        // screen sums the entries where the history screen sorts them, and the
+        // two must never disagree about what a child can afford.
+        let busy = try withRedemptions(try makeBusyHousehold(choreCount: 2, historyDays: 60))
+        let ledger = busy.snapshot.ledger
+        let dear = try #require(busy.snapshot.rewards.max { $0.cost < $1.cost })
+
+        for member in busy.members {
+            let affordable = ledger.balance(for: member.id) >= dear.cost
+            let availability = busy.snapshot.availability(
+                of: dear, for: member.id, on: busy.today
+            )
+            #expect(
+                (availability == .tooExpensive(shortBy: dear.cost - ledger.balance(for: member.id)))
+                    == !affordable)
+        }
+    }
+
+    @Test("A recap counting what is owed stays fast on two years of redemptions")
+    func recapIsFastOnALongRedemptionHistory() throws {
+        let busy = try withRedemptions(try makeBusyHousehold(choreCount: 4))
+        var owed = -1
+
+        let elapsed = duration {
+            owed =
+                busy.snapshot.insights
+                .weeklyRecap(forWeekContaining: busy.today)
+                .rewardsOwed
+        }
+
+        #expect(owed >= 0)
+        #expect(elapsed < 2.0)
     }
 }

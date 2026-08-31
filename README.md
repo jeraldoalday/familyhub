@@ -47,7 +47,7 @@ The domain and store layers build and test with nothing but the Swift toolchain:
 
 ```bash
 make check      # build + test + lint + release build — the pre-commit gate
-make test       # 904 tests
+make test       # 907 tests
 make format     # reformat in place
 make lint       # the exact formatting check CI runs
 make release    # the optimised build CI also runs

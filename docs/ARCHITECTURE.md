@@ -27,7 +27,7 @@ and then it stops being faster, for three specific reasons.
 **Testability.** Every rule in this app is about time — recurrence, streaks,
 overdue states, cooldowns. Rules that live on a `@Model` need a container to
 test, which means tests that take seconds instead of microseconds, which in
-practice means tests that do not get written. The 904 tests here run in under
+practice means tests that do not get written. The 907 tests here run in under
 half a second because none of them touch a database.
 
 **Replaceability.** Local-only storage today, iCloud sync later. With rules in
