@@ -337,4 +337,30 @@ struct PermissionsTests {
             )
         }
     }
+
+    // MARK: The refusal itself
+
+    @Test("A refusal names the role the way a person would say it")
+    func refusalsPluraliseTheRole() {
+        #expect(
+            DomainError.notPermitted(action: .redeemReward, role: .child).errorDescription
+                == "Children can't redeem rewards.")
+        #expect(
+            DomainError.notPermitted(action: .createChore, role: .teen).errorDescription
+                == "Teens can't create chores.")
+        #expect(
+            DomainError.notPermitted(action: .manageHousehold, role: .adult).errorDescription
+                == "Adults can't change household settings.")
+    }
+
+    @Test("No role is refused in a sentence that misspells what it is")
+    func noRefusalMisspellsARole() {
+        for role in MemberRole.allCases {
+            for action in DomainError.Action.allCases {
+                let message = DomainError.notPermitted(action: action, role: role).errorDescription
+                #expect(message?.hasPrefix(role.pluralLabel) == true)
+                #expect(message?.contains("Childs") == false)
+            }
+        }
+    }
 }

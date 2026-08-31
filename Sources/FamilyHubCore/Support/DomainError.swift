@@ -192,7 +192,7 @@ extension DomainError: LocalizedError {
         case .wouldLeaveHouseholdWithoutAdult:
             return "Every household needs at least one adult. Make someone else an adult first."
         case .notPermitted(let action, let role):
-            return "\(role.label)s can't \(action.label)."
+            return "\(role.pluralLabel) can't \(action.label)."
         case .insufficientPoints(let balance, let required):
             return
                 "That costs \(required) points and you have \(balance). \(required - balance) to go!"

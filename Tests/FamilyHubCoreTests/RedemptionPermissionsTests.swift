@@ -62,8 +62,9 @@ struct RedemptionPermissionsTests {
         let handOver = DomainError.notPermitted(action: .handOverReward, role: child)
         let cancel = DomainError.notPermitted(action: .cancelRedemption, role: child)
 
-        #expect(handOver.errorDescription == "Childs can't hand a reward over.")
-        #expect(cancel.errorDescription == "Childs can't cancel somebody else's reward.")
+        #expect(handOver.errorDescription == "Children can't hand a reward over.")
+        #expect(
+            cancel.errorDescription == "Children can't cancel somebody else's reward.")
     }
 
     // MARK: Handing over

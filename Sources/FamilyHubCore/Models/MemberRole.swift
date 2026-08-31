@@ -54,6 +54,22 @@ public enum MemberRole: String, Codable, Sendable, CaseIterable, Comparable {
         }
     }
 
+    /// The role in the plural, for the sentence a refusal is written into.
+    ///
+    /// Spelled out per case rather than by appending an "s" to ``label``,
+    /// because exactly one of the four does not take one — and "Childs can't
+    /// redeem rewards" is a message a six year old reads, in an app whose whole
+    /// job is to be trusted by them about what they are and are not allowed to
+    /// do.
+    public var pluralLabel: String {
+        switch self {
+        case .owner: "Owners"
+        case .adult: "Adults"
+        case .teen: "Teens"
+        case .child: "Children"
+        }
+    }
+
     /// A one-line explanation shown beneath the role when inviting someone, so
     /// the person choosing understands what they are granting.
     public var summary: String {
