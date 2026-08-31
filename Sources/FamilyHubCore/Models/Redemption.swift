@@ -200,6 +200,31 @@ extension Redemption {
     /// How many days a redemption may sit before the app starts calling it
     /// overdue.
     public static let overdueAfterDays = 2
+
+    /// Whether the household still owed this at a given moment.
+    ///
+    /// Asked of the past rather than of now, which is what a recap of last week
+    /// needs: a promise that was outstanding all week and kept on Sunday
+    /// evening was outstanding for the week being described, and reading the
+    /// current state would quietly rewrite it.
+    ///
+    /// - Parameter date: The moment being asked about.
+    /// - Returns: `true` when it had been redeemed by then and had not yet been
+    ///   given or called off.
+    public func wasOutstanding(at date: Date) -> Bool {
+        guard redeemedAt <= date else { return false }
+        guard let settledAt = state.settledAt else { return true }
+        return settledAt > date
+    }
+
+    /// Whether this reward was actually handed over inside a period.
+    ///
+    /// - Parameter range: The period being summarised.
+    /// - Returns: `true` when it was given during it.
+    public func wasGiven(in range: ClosedRange<Date>) -> Bool {
+        guard state.isGiven, let settledAt = state.settledAt else { return false }
+        return range.contains(settledAt)
+    }
 }
 
 // MARK: - Mutation

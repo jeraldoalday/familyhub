@@ -55,6 +55,21 @@ public struct HouseholdInsights: Sendable {
         /// wants rescheduling rather than a family that wants nagging.
         public let mostMissedChore: Chore?
 
+        /// Rewards actually handed over during the period.
+        ///
+        /// The half of the reward economy a household can otherwise never see.
+        /// Points spent are visible on every screen; promises kept are visible
+        /// nowhere, and a week where the family delivered two of them is a week
+        /// worth telling them about.
+        public let rewardsGiven: Int
+
+        /// Rewards paid for and still not handed over when the period ended.
+        ///
+        /// Counted as the period saw it rather than as things stand now, so a
+        /// recap of last week does not quietly rewrite itself once somebody
+        /// settles up on Monday.
+        public let rewardsOwed: Int
+
         /// The proportion of due work that got done, `0...1`.
         ///
         /// A period that asked nothing scores 1 rather than 0. Nothing due and
@@ -73,6 +88,14 @@ public struct HouseholdInsights: Sendable {
 
         /// Whether anything at all was asked of the household.
         public var isQuiet: Bool { scheduled == 0 }
+
+        /// Whether the household ended the period owing nobody anything.
+        ///
+        /// Worth saying out loud on the recap card, and worth saying only when
+        /// it is true. A family that keeps its promises about rewards is a
+        /// family whose points mean something, and it is the one part of this
+        /// summary the adults control entirely.
+        public var keptEveryPromise: Bool { rewardsOwed == 0 }
     }
 
     /// One member's week.
@@ -96,6 +119,15 @@ public struct HouseholdInsights: Sendable {
 
         /// Their run of complete days, measured at the end of the period.
         public let streak: Streak
+
+        /// Rewards they had paid for and were still waiting on when the period
+        /// ended.
+        ///
+        /// On the member's own row because that is where it is actionable. A
+        /// household total tells an adult that somebody is waiting; this tells
+        /// them who, on the same card that is already telling them how much
+        /// that person did.
+        public let rewardsOwed: Int
 
         public var id: Identifier<Member> { member.id }
 
@@ -165,6 +197,7 @@ public struct HouseholdInsights: Sendable {
         // counted it would congratulate a household for a promise it broke.
         let pointsEarned = entries.filter(\.isEarned).reduce(0) { $0 + $1.amount }
 
+        let periodEnd = endOfDay(lastDay)
         return Recap(
             range: range,
             scheduled: settled.count,
@@ -173,7 +206,11 @@ public struct HouseholdInsights: Sendable {
             pointsEarned: pointsEarned,
             members: memberSummaries(in: range, occurrences: settled, completions: completions),
             busiestDay: busiestDay(from: perDay),
-            mostMissedChore: mostMissed(from: missesByChore)
+            mostMissedChore: mostMissed(from: missesByChore),
+            rewardsGiven: snapshot.redemptions.count {
+                $0.wasGiven(in: firstDay...periodEnd)
+            },
+            rewardsOwed: snapshot.redemptions.count { $0.wasOutstanding(at: periodEnd) }
         )
     }
 
@@ -388,7 +425,10 @@ public struct HouseholdInsights: Sendable {
                 completed: done.count,
                 completedByThem: byThem.count,
                 pointsEarned: ledger.earned(by: member.id, in: periodRange),
-                streak: streaks.streak(forMember: member.id, asOf: range.upperBound)
+                streak: streaks.streak(forMember: member.id, asOf: range.upperBound),
+                rewardsOwed: snapshot.redemptions.count {
+                    $0.memberID == member.id && $0.wasOutstanding(at: periodRange.upperBound)
+                }
             )
         }
     }
