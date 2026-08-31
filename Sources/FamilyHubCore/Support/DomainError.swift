@@ -49,6 +49,14 @@ public enum DomainError: Error, Equatable, Sendable {
     /// The reward is not available to redeem right now.
     case rewardUnavailable(reason: String)
 
+    /// Somebody acted on a redemption that had already been handed over or
+    /// called off.
+    ///
+    /// The ordinary case rather than the exotic one: two parents both tick off
+    /// the same movie night from two devices, and the second has to be told
+    /// rather than silently restamping the first with a different evening.
+    case redemptionAlreadySettled
+
     // MARK: Subscription
 
     /// The household's plan does not include this feature.
@@ -116,6 +124,7 @@ extension DomainError {
         case mealNotes
         case eventTitle
         case coverNote
+        case redemptionNote
         case points
         case quantity
     }
@@ -187,6 +196,8 @@ extension DomainError: LocalizedError {
                 "That costs \(required) points and you have \(balance). \(required - balance) to go!"
         case .rewardUnavailable(let reason):
             return "That reward isn't available right now — \(reason)."
+        case .redemptionAlreadySettled:
+            return "Somebody has already dealt with that one."
         case .requiresUpgrade(let feature, _):
             return "\(feature.label) is part of \(Household.Tier.plus.label)."
         case .unsatisfiableRecurrence(let reason):
@@ -222,6 +233,7 @@ extension DomainError.Field {
         case .mealNotes: "Meal notes"
         case .eventTitle: "Event title"
         case .coverNote: "Reason"
+        case .redemptionNote: "Note"
         case .points: "Points"
         case .quantity: "Quantity"
         }
