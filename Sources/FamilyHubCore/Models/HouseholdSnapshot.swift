@@ -399,14 +399,10 @@ extension HouseholdSnapshot {
         // inside the loop for the sake of a list that is usually empty.
         let trips = awayPeriods.live(on: normalizedDay, calendar: engine.calendar)
 
-        // A person who is away is not being asked for anything, so their list
-        // is empty rather than full of work they cannot do. Answered before the
-        // walk, because the answer does not depend on the chores: an open chore
-        // that stays on everybody's list is still not on the list of somebody
-        // who is in Spain.
-        if let memberID, trips.contains(where: { $0.covers(memberID) }) {
-            return []
-        }
+        // Whether the person whose list this is happens to be away. Resolved
+        // before the walk, because the answer does not depend on the chores.
+        let viewerIsAway =
+            memberID.map { id in trips.contains { $0.covers(id) } } ?? false
 
         // Indexed once rather than searched per chore: a household with a
         // year of history has thousands of completions, and a linear scan
@@ -459,6 +455,20 @@ extension HouseholdSnapshot {
                     coveringMemberID.map { $0 == memberID }
                     ?? (assigneeID == nil || assigneeID == memberID)
                 guard isMine else { continue }
+
+                // Somebody who is away is not being asked for anything, so
+                // their list holds none of the work — not even the open chores
+                // that stay on everybody else's, because "whoever gets there
+                // first" cannot be somebody in Spain. What they did anyway
+                // stays, on the same terms the streak keeps it: being away
+                // excuses the work, it does not take back the credit, and a
+                // row that vanished the moment it was ticked off would be the
+                // app hiding what it has just paid somebody for.
+                if viewerIsAway,
+                    !(completionsByOccurrence[key]?.approval.countsAsDone ?? false)
+                {
+                    continue
+                }
             }
 
             entries.append(

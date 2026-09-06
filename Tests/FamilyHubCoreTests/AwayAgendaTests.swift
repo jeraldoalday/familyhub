@@ -166,6 +166,39 @@ struct AwayAgendaTests {
         #expect(alexes.map(\.chore.id) == [fixture.dishwasher.id])
     }
 
+    @Test("What somebody did anyway while away stays on their list")
+    func completedWorkStaysOnAnAwayList() throws {
+        var fixture = try makeFixture()
+        fixture.snapshot.awayPeriods = [try away(in: fixture, members: [fixture.sam.id])]
+        fixture.snapshot.completions = [
+            ChoreCompletion(
+                householdID: fixture.snapshot.household.id,
+                choreID: fixture.bins.id,
+                occurrenceDay: monday,
+                completedBy: fixture.sam.id,
+                completedAt: monday,
+                approval: .notRequired,
+                pointsAwarded: 10,
+                calendar: calendar
+            )
+        ]
+
+        // He is still not being asked for the open chore, but the one he did
+        // from his grandmother's is his and must not vanish the moment he
+        // ticks it off.
+        let his = fixture.snapshot.agenda(for: monday, memberID: fixture.sam.id)
+        #expect(his.map(\.chore.id) == [fixture.bins.id])
+        #expect(his[0].isDone)
+
+        // And the household's list agrees about the same square.
+        let binRow = try #require(
+            fixture.snapshot.agenda(for: monday).first { $0.chore.id == fixture.bins.id }
+        )
+        #expect(binRow.isDone)
+        #expect(binRow.isAway)
+        #expect(!binRow.needsSomebodyElse)
+    }
+
     @Test("A covered chore follows the person covering it, away and all")
     func coverMovesTheAbsence() throws {
         var fixture = try makeFixture()
