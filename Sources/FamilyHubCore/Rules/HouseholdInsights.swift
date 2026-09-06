@@ -18,11 +18,15 @@ public struct HouseholdInsights: Sendable {
     private let calendar: Calendar
     private let engine: RecurrenceEngine
 
+    /// The household's trips, already filtered to the ones still standing.
+    private let awayPeriods: [AwayPeriod]
+
     /// Creates an insights view over a household.
     public init(snapshot: HouseholdSnapshot) {
         self.snapshot = snapshot
         self.calendar = snapshot.household.calendar()
         self.engine = snapshot.engine
+        self.awayPeriods = snapshot.awayPeriods.filter(\.isActive)
     }
 
     // MARK: - The week in review
@@ -164,14 +168,14 @@ public struct HouseholdInsights: Sendable {
         let lastDay = max(firstDay, calendar.startOfDay(for: end))
         let range = firstDay...lastDay
 
-        // A chore due today counts as scheduled even though it has not been
-        // missed yet. Excluding it would make the completion rate climb every
-        // morning and fall every evening for reasons unrelated to the work.
-        let settled = occurrences(in: range)
         let completions = Dictionary(
             settledCompletions.map { ($0.occurrenceKey, $0) },
             uniquingKeysWith: { first, _ in first }
         )
+        // A chore due today counts as scheduled even though it has not been
+        // missed yet. Excluding it would make the completion rate climb every
+        // morning and fall every evening for reasons unrelated to the work.
+        let settled = occurrences(in: range, completed: Set(completions.keys))
 
         var completed = 0
         var onTime = 0
@@ -309,7 +313,10 @@ public struct HouseholdInsights: Sendable {
     public func workloadBalance(from start: Date, to end: Date) -> WorkloadBalance {
         let firstDay = calendar.startOfDay(for: start)
         let lastDay = max(firstDay, calendar.startOfDay(for: end))
-        let occurrences = self.occurrences(in: firstDay...lastDay)
+        let occurrences = self.occurrences(
+            in: firstDay...lastDay,
+            completed: Set(settledCompletions.map(\.occurrenceKey))
+        )
 
         var pointsByMember: [Identifier<Member>: Int] = [:]
         var countByMember: [Identifier<Member>: Int] = [:]
@@ -380,21 +387,57 @@ public struct HouseholdInsights: Sendable {
     /// it. A fairness screen crediting the rota rather than the household is a
     /// fairness screen that is wrong about the exact weeks somebody carried
     /// more than their share, which are the only weeks anybody opens it.
-    private func occurrences(in range: ClosedRange<Date>) -> [ScheduledOccurrence] {
+    ///
+    /// An occurrence nobody was here for is not counted as having been asked
+    /// for at all. It leaves both numbers this feeds: a family that spent half
+    /// a week in Spain is not a family that completed 40% of its chores, and a
+    /// child who was at their grandmother's did not carry a lighter load than
+    /// their sibling that week — they were not offered one.
+    ///
+    /// - Parameters:
+    ///   - range: The window to expand.
+    ///   - completed: The occurrences that were recorded as done. An away day
+    ///     somebody did the work on anyway stays in, because it was work the
+    ///     household got, and a fairness screen that dropped it would credit
+    ///     nobody for it.
+    /// - Returns: The occurrences the household was actually asked for.
+    private func occurrences(
+        in range: ClosedRange<Date>,
+        completed: Set<ChoreCompletion.OccurrenceKey>
+    ) -> [ScheduledOccurrence] {
         let covers = snapshot.coverRequests.acceptedCoversByOccurrence()
         return snapshot.activeChores.flatMap { chore -> [ScheduledOccurrence] in
             chore.indexedOccurrences(in: range, using: engine, maximum: Int.max)
-                .map { occurrence in
+                .compactMap { occurrence in
                     let key = ChoreCompletion.OccurrenceKey(
                         choreID: chore.id, day: occurrence.day
                     )
                     let rota = chore.assignee(forOccurrenceIndex: occurrence.index)
+                    let assigneeID = covers[key]?.resolution.coveringMemberID ?? rota
+
+                    if !completed.contains(key), wasAway(assigneeID, on: occurrence.day) {
+                        return nil
+                    }
                     return ScheduledOccurrence(
                         chore: chore,
                         day: occurrence.day,
-                        assigneeID: covers[key]?.resolution.coveringMemberID ?? rota
+                        assigneeID: assigneeID
                     )
                 }
+        }
+    }
+
+    /// Whether the person a piece of work fell to was away that day.
+    ///
+    /// Passed `nil` — a chore open to anybody — only an empty house counts, on
+    /// the same terms the agenda and the streak calculator apply: "whoever gets
+    /// there first" has somebody to be right up until there is nobody left.
+    private func wasAway(_ memberID: Identifier<Member>?, on day: Date) -> Bool {
+        guard !awayPeriods.isEmpty else { return false }
+        return awayPeriods.contains { period in
+            guard period.covers(day, calendar: calendar) else { return false }
+            guard let memberID else { return period.isWholeHousehold }
+            return period.covers(memberID)
         }
     }
 
