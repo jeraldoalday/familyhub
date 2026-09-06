@@ -47,7 +47,7 @@ The domain and store layers build and test with nothing but the Swift toolchain:
 
 ```bash
 make check      # build + test + lint + release build — the pre-commit gate
-make test       # 907 tests
+make test       # 990 tests
 make format     # reformat in place
 make lint       # the exact formatting check CI runs
 make release    # the optimised build CI also runs
@@ -93,7 +93,7 @@ Sources/
   FamilyHubCore/
     Models/            Households, members, chores, completions, rewards,
                        redemptions, lists, planned meals, calendar events,
-                       chore packs, cover requests
+                       chore packs, cover requests, away periods
     Scheduling/        Recurrence engine, weekdays, reminder planning
     Rules/             Permissions, points ledger, streaks, insights, meal
                        plan, family calendar, search, aisle guessing,
@@ -115,7 +115,7 @@ docs/
 |---|---|
 | Households, members, roles, permissions | ✅ complete, tested |
 | Chores, rotation, skipping, archiving | ✅ complete, tested |
-| Recurrence engine (daily / weekly / monthly) | ✅ complete, tested |
+| Recurrence engine (daily / weekly / monthly / yearly) | ✅ complete, tested |
 | Completions, approval queue, conflict resolution | ✅ complete, tested |
 | Points ledger, rewards, redemption rules | ✅ complete, tested |
 | Tracking a redeemed reward until it is actually handed over | ✅ complete, tested |
@@ -125,10 +125,12 @@ docs/
 | Adding a whole shopping list by pasting it | ✅ complete, tested |
 | Sending a list to somebody who hasn't got the app | ✅ complete, tested |
 | Asking somebody to cover a chore, for one day | ✅ complete, tested |
+| Recording the days a household, or one child, is away | ✅ complete, tested |
 | Starter chore packs for a household's first day | ✅ complete, tested |
 | Meal planning, cooking rota, and the shopping it implies | ✅ complete, tested |
 | Family calendar, recurring events, and clash detection | ✅ complete, tested |
 | Streaks, per chore and per member | ✅ complete, tested |
+| A holiday that breaks no streak and spoils no recap | ✅ complete, tested |
 | Weekly recap and workload fairness | ✅ complete, tested |
 | Reminder planning (what to say, and when) | ✅ complete, tested |
 | Schema versioning and backup migration | ✅ complete, tested |

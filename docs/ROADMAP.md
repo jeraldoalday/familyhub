@@ -5,11 +5,12 @@ Two weeks, from a tested domain core to something submittable to App Review.
 ## Where things stand
 
 **Day 1 is done, and then some.** The domain and store layers are complete and
-tested: 907 tests covering recurrence, chore rotation, permissions, the points
+tested: 990 tests covering recurrence, chore rotation, permissions, the points
 ledger, shopping lists, streaks, the weekly recap, workload fairness, reminder
 planning, meal planning, the family calendar, household-wide search, covering
 each other's chores, tracking a redeemed reward until somebody actually hands
-it over, the command layer, the change feed, and the backup format.
+it over, the days a household is not at home, the command layer, the change
+feed, and the backup format.
 `make check` builds, tests, and lints in a few seconds.
 
 Some of that was pulled forward out of later days on purpose. Streaks,
@@ -57,6 +58,23 @@ sat on for days is worth a notification, which is the only place in the app
 where the person being nudged is the parent and the person waiting is the child.
 Settling those against a test suite is far cheaper than settling them against a
 rewards screen that has already assumed one of them.
+
+Going away was pulled forward last, and on the strongest version of the same
+argument. A rota is a promise about ordinary weeks, and the weeks a family
+remembers are the other ones — and the app's only answer to a fortnight in
+Spain was to skip every occurrence of every chore, one day at a time, before
+leaving. Nobody does that. What actually happened was that the family came home
+to a fortnight of red, every streak in the house broken, a completion rate that
+said they had given up, and a phone that had spent the holiday asking a nine
+year old to feed a cat two thousand miles away. Each of those four is a
+separate screen deciding what a person's day meant, which is exactly the sort
+of decision that is cheap to settle against a test suite and expensive to
+settle once four screens have each assumed something different. They now agree:
+the away person's list is empty, the household's keeps every row so somebody
+can pick it up, an away day is neutral for a streak rather than a miss, and the
+recap counts the days the household was actually here. Work somebody did anyway
+while away counts in all four, because being away excuses the work and does not
+refuse the credit for having done it.
 
 The calendar was pulled forward for a different reason. It was the last feature
 the README promised that the domain could not answer a single question about,
@@ -107,7 +125,12 @@ management, the approvals queue, the queue of rewards the household still owes
 points history, and the two rows covering
 needs: an ask on the chore that has one, and an inbox of the asks a person can
 answer — `coverInbox(for:on:)` already answers the second, and sharing a
-shopping list is `ShoppingListText` handed to a `UIActivityViewController`. Same
+shopping list is `ShoppingListText` handed to a `UIActivityViewController`.
+Family settings also gains the away sheet: `goAway(from:to:in:by:members:)`
+writes it, `membersAway(on:)` renders the strip on the home screen, and
+`upcomingAwayPeriods(after:)` the row that says what is next. The agenda row
+already carries `needsSomebodyElse`, which is the state that screen has to be
+able to draw. Same
 pattern as day 3, so it should move faster. The meal plan's week grid and the
 calendar's are the stretch items here rather than commitments: `MealPlan` and `FamilyCalendar`
 already answer everything either grid needs to render — including which of two
@@ -135,8 +158,9 @@ saying and when: the morning digest, the approval queue, the streak about to
 break, the afternoon nudge to whoever is cooking, the Sunday prompt about next
 week's undecided dinners, the appointment that outranks all of them, the ask
 from somebody who needs their chore covered today, the reward a child paid for
-nine days ago and is still waiting on, and the per-person daily cap that keeps
-the channel from being switched off. What is left is the platform
+nine days ago and is still waiting on, the silence owed to anybody who is not
+at home, and the per-person daily cap that keeps the channel from being
+switched off. What is left is the platform
 half — authorisation, translating each `Reminder` into a
 `UNNotificationRequest`, and re-planning on launch and on change. Smaller than
 it was.

@@ -90,8 +90,10 @@ its own history.
 **`RecurrenceEngine`** is the piece most likely to grow a subtle bug. Its tests
 are correspondingly the most thorough in the suite. If you change it, the
 cases that matter are: phase preservation when the requested window opens
-mid-cycle, months that lack the requested day, and the interaction between
-skipped days and an occurrence limit.
+mid-cycle, months that lack the requested day, years that lack it — a rule
+anchored on 29 February is dropped in a common year rather than rolled onto 1
+March, for the same reason the 31st is dropped in February — and the interaction
+between skipped days and an occurrence limit.
 
 **`HouseholdSnapshot.agenda(for:memberID:)`** is the hottest read path — it runs
 on every home-screen render. It indexes completions once rather than searching
@@ -111,6 +113,33 @@ fairness screen resolve an occurrence through the cover before the rota, because
 crediting the rota for work somebody else agreed to do is not a guess but a
 known-wrong number — and the weeks where somebody carried more than their share
 are the only weeks anybody opens that screen.
+
+**Being away is a fact about people, not a change to the schedule.** An
+`AwayPeriod` names days and the members they apply to, and the chores are left
+exactly as they were — the same shape as a cover request and, before it, a
+skipped day. What reads the record is every screen that judges somebody by what
+they did that day, and each of them has to answer the same question the same
+way: whose absence excuses this occurrence. The answer is whoever the row was
+actually waiting on, which is the person covering it before the person the rota
+named; a chore open to anybody has nobody to name, so only an empty house
+excuses one. That last distinction is why "everybody is away individually" and
+"the household is away" are different records rather than the same one counted
+twice, and why the command layer collapses a trip naming every member into the
+family holiday it is.
+
+Four consequences follow, and they are the feature. The away person's agenda is
+empty while the household's keeps every row, marked, because somebody still has
+to feed the cat. An away day neither extends a streak nor breaks it, on exactly
+the argument a day with nothing assigned was already neutral. The recap and the
+fairness screen drop the occurrence from what was asked for, so a week half
+spent in Spain is not a week the family failed and a child at their
+grandmother's did not carry a lighter share — they were not offered one. And the
+reminder planner sends nothing that asks for work, because the notification
+channel is the one part of the app a family can switch off permanently and four
+days of being asked to feed a cat two thousand miles away is how they decide to.
+
+In all four, work somebody did anyway while away still counts. Being away
+excuses the work; it does not refuse the credit for having done it.
 
 **A redeemed reward is a promise, not a transaction.** Spending points used to
 be a single ledger line, which meant the app treated "Sam has bought a movie
@@ -247,13 +276,19 @@ drop the write entirely.
 `FamilyHubStore.schemaVersion` is stamped into every export, and
 `HouseholdArchive.migrated()` is the ladder that brings an older file up to the
 current shape. Version 2 added the meal plan, version 3 the family calendar,
-version 4 the cover requests, and version 5 the redemption records; an older
-file restores as a household with no planned meals, no events, no swaps, and
-nothing owed, which is not a gap to be filled in but the truth about a household
-that predated the feature. Version 4 is the sharpest case: its ledger plainly
-shows rewards being redeemed, and inventing records from those entries would
-fill a family's queue with films they watched in February and tell them they are
-still owed.
+version 4 the cover requests, version 5 the redemption records, and version 6
+the away periods; an older file restores as a household with no planned meals,
+no events, no swaps, nothing owed, and no holidays, which is not a gap to be
+filled in but the truth about a household that predated the feature. Versions 4
+and 5 are the sharpest cases, and both are sharp for the same reason: the older
+file contains a shape a migration could be tempted to read the new records out
+of. A version 4 ledger plainly shows rewards being redeemed, and inventing
+records from those entries would fill a family's queue with films they watched
+in February and tell them they are still owed. A version 5 history contains
+weeks where every chore was missed at once — which describes a fortnight in
+Spain and equally describes the fortnight the family stopped using the app, and
+guessing between them rewrites what a household did on the one screen it goes to
+in order to find out.
 
 Two habits keep that cheap. `HouseholdSnapshot` decodes every collection as
 optional-with-empty rather than required, so a backup written before a feature
@@ -267,7 +302,8 @@ The rule that follows: adding a collection to the snapshot means bumping the
 version, adding a migration case, and testing it against a file with the key
 genuinely absent. Encoding an empty array and reading it back only proves the
 current encoder can read itself. The calendar followed exactly that path,
-and so did covering, and so did redemptions; each migration step is one line in
+and so did covering, and so did redemptions, and so did going away; each
+migration step is one line in
 a switch, which is the
 return on having built the ladder at version 1 when it was the identity
 function.
