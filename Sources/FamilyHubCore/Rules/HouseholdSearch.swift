@@ -42,6 +42,7 @@ public struct HouseholdSearch: Sendable {
         case meal
         case reward
         case shoppingItem
+        case awayPeriod
 
         public static func < (lhs: Self, rhs: Self) -> Bool {
             lhs.rawValue < rhs.rawValue
@@ -56,6 +57,7 @@ public struct HouseholdSearch: Sendable {
             case .meal: "Meals"
             case .reward: "Rewards"
             case .shoppingItem: "Shopping"
+            case .awayPeriod: "Away"
             }
         }
     }
@@ -72,6 +74,7 @@ public struct HouseholdSearch: Sendable {
         case meal(PlannedMeal)
         case reward(Reward)
         case shoppingItem(ShoppingItem)
+        case awayPeriod(AwayPeriod)
 
         /// Which kind of record this is.
         public var kind: Kind {
@@ -82,6 +85,7 @@ public struct HouseholdSearch: Sendable {
             case .meal: .meal
             case .reward: .reward
             case .shoppingItem: .shoppingItem
+            case .awayPeriod: .awayPeriod
             }
         }
     }
@@ -143,6 +147,7 @@ public struct HouseholdSearch: Sendable {
             case .meal(let value): "meal:\(value.id)"
             case .reward(let value): "reward:\(value.id)"
             case .shoppingItem(let value): "item:\(value.id)"
+            case .awayPeriod(let value): "away:\(value.id)"
             }
         }
     }
@@ -289,6 +294,32 @@ public struct HouseholdSearch: Sendable {
             )
         }
 
+        for period in snapshot.awayPeriods where scope == .everything || period.isActive {
+            // Matched on the names of the people it covers as well as on where
+            // they went, which is the same argument the meal plan's ingredients
+            // are matched on: "when is Sam at his gran's" is a question about
+            // a trip that nobody would think to ask the away screen, and the
+            // person asking it is going to type a name.
+            let names = snapshot.activeMembers
+                .filter { period.covers($0.id) }
+                .map { $0.name.value as String? }
+            guard
+                let strength = HouseholdSearch.match(
+                    needle,
+                    in: period.reason?.value ?? HouseholdSearch.awayFallbackTitle,
+                    alsoIn: names
+                )
+            else { continue }
+            hits.append(
+                Hit(
+                    subject: .awayPeriod(period),
+                    strength: strength,
+                    title: period.reason?.value ?? HouseholdSearch.awayFallbackTitle,
+                    isRetired: !period.isActive
+                )
+            )
+        }
+
         return
             hits
             .sorted(by: HouseholdSearch.order)
@@ -325,6 +356,13 @@ public struct HouseholdSearch: Sendable {
 
     /// The shortest query worth answering.
     public static let minimumQueryLength = 2
+
+    /// What a trip is called when the family did not say where they were going.
+    ///
+    /// A title rather than an empty row, and the word people would type: a
+    /// search for "away" should find the fortnight the household is away even
+    /// though nobody wrote that word down anywhere.
+    public static let awayFallbackTitle = "Away"
 
     /// How `needle` matches `name`, or `nil` if it does not.
     ///
@@ -427,6 +465,9 @@ public struct HouseholdSearch: Sendable {
         case .meal(let meal): meal.summary
         case .reward(let reward): "\(reward.cost) points"
         case .shoppingItem(let item): item.category.label
+        case .awayPeriod(let period):
+            "\(period.who(among: snapshot.activeMembers)) · "
+                + "\(period.dayCount(calendar: snapshot.household.calendar())) days"
         }
     }
 

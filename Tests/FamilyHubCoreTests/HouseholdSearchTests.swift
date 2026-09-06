@@ -124,6 +124,26 @@ struct HouseholdSearchTests {
             purchase: .init(by: alex.id, at: clock.now)
         )
 
+        let halfTerm = try AwayPeriod(
+            householdID: household.id,
+            firstDay: day(5),
+            lastDay: day(8),
+            memberIDs: [sam.id],
+            reason: "Swimming camp",
+            createdBy: alex.id,
+            createdAt: clock.now,
+            calendar: calendar
+        )
+        let calledOff = try AwayPeriod(
+            householdID: household.id,
+            firstDay: day(20),
+            lastDay: day(24),
+            reason: "Swimming in Spain",
+            createdBy: alex.id,
+            createdAt: clock.now,
+            calendar: calendar
+        ).cancelled(at: clock.now)
+
         let snapshot = HouseholdSnapshot(
             household: household,
             members: [sam, alex, gone],
@@ -132,7 +152,8 @@ struct HouseholdSearchTests {
             shoppingLists: [list],
             shoppingItems: [goggles, bought],
             plannedMeals: [meal],
-            events: [swimming, cancelled]
+            events: [swimming, cancelled],
+            awayPeriods: [halfTerm, calledOff]
         )
         return Fixture(
             snapshot: snapshot, sam: sam, alex: alex, swimming: swimming,
@@ -284,9 +305,9 @@ struct HouseholdSearchTests {
 
         let everything = f.snapshot.search.results(for: "swimming", scope: .everything)
         #expect(everything.count > active.count)
-        // The archived chore, the cancelled event, the withdrawn reward, and
-        // the cap that was already bought.
-        #expect(everything.filter(\.isRetired).count == 4)
+        // The archived chore, the cancelled event, the withdrawn reward, the
+        // cap that was already bought, and the holiday that was called off.
+        #expect(everything.filter(\.isRetired).count == 5)
     }
 
     @Test("A member who has left is found only when everything is asked for")
@@ -297,6 +318,69 @@ struct HouseholdSearchTests {
         let everything = f.snapshot.search.results(for: "sasha", scope: .everything)
         #expect(everything.map(\.title) == ["Sasha"])
         #expect(everything.first?.isRetired == true)
+    }
+
+    @Test("A trip is found by where they went")
+    func findsATripByItsReason() throws {
+        let f = try makeFixture()
+        let hit = try #require(
+            f.snapshot.search.results(for: "Swimming camp").first
+        )
+        #expect(hit.kind == .awayPeriod)
+        #expect(hit.title == "Swimming camp")
+        #expect(hit.detail == "Sam · 4 days")
+    }
+
+    @Test("A trip is found by the name of whoever is on it")
+    func findsATripByWhoIsOnIt() throws {
+        let f = try makeFixture()
+        let results = f.snapshot.search.results(for: "Sam")
+
+        // The person comes first and their trip comes with them, which is the
+        // whole reason the search crosses screens: nobody would think to ask
+        // the away screen when Sam is at his gran's.
+        #expect(results.first?.kind == .member)
+        #expect(
+            results.contains {
+                if case .awayPeriod(let period) = $0.subject { return period.covers(f.sam.id) }
+                return false
+            }
+        )
+    }
+
+    @Test("A trip with nowhere written down is still findable")
+    func findsATripWithNoReason() throws {
+        var f = try makeFixture()
+        var snapshot = f.snapshot
+        snapshot.awayPeriods = [
+            try AwayPeriod(
+                householdID: snapshot.household.id,
+                firstDay: day(2),
+                lastDay: day(3),
+                createdBy: f.alex.id,
+                createdAt: clock.now,
+                calendar: calendar
+            )
+        ]
+        f = Fixture(
+            snapshot: snapshot, sam: f.sam, alex: f.alex, swimming: f.swimming,
+            towels: f.towels, bins: f.bins
+        )
+
+        let hit = try #require(f.snapshot.search.results(for: "away").first)
+        #expect(hit.title == "Away")
+        #expect(hit.detail == "Everyone · 2 days")
+    }
+
+    @Test("A trip that was called off stays out of the way")
+    func cancelledTripsAreRetired() throws {
+        let f = try makeFixture()
+        let live = f.snapshot.search.results(for: "Swimming in Spain")
+        #expect(live.isEmpty)
+
+        let everything = f.snapshot.search.results(for: "Swimming in Spain", scope: .everything)
+        #expect(everything.count == 1)
+        #expect(everything[0].isRetired)
     }
 
     @Test("Nothing matching is an empty list, not an error")
