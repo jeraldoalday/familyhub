@@ -299,6 +299,50 @@ struct HotPathTests {
         return BusyHousehold(snapshot: snapshot, today: busy.today, members: members)
     }
 
+    /// Two years of a household that is somewhere else most weeks: a sleepover,
+    /// a school trip, a night at their father's, and the occasional holiday
+    /// that empties the house.
+    ///
+    /// Every trip is behind `today`, so the day the guards below measure is an
+    /// ordinary one. That is the shape that matters: the cost of carrying a
+    /// travel history has to be paid on days nobody is away, and a fixture
+    /// whose trips covered the measured day would hide it behind an agenda that
+    /// returns early.
+    private func withAwayPeriods(
+        _ busy: BusyHousehold,
+        historyDays: Int = 730
+    ) throws -> BusyHousehold {
+        var snapshot = busy.snapshot
+        let members = busy.members
+        var trips: [AwayPeriod] = []
+
+        for offset in stride(from: -historyDays, to: -7, by: 7) {
+            guard
+                let first = calendar.date(byAdding: .day, value: offset, to: busy.today),
+                let last = calendar.date(byAdding: .day, value: 1, to: first)
+            else { continue }
+            // Every fourth one empties the house; the rest name one person, so
+            // both branches of "whose absence excuses this" are exercised.
+            let named: Set<Identifier<Member>> =
+                offset % 28 == 0 ? [] : [members[abs(offset / 7) % members.count].id]
+            trips.append(
+                try AwayPeriod(
+                    householdID: snapshot.household.id,
+                    firstDay: first,
+                    lastDay: last,
+                    memberIDs: named,
+                    reason: "Trip \(offset)",
+                    createdBy: members[0].id,
+                    createdAt: first,
+                    calendar: calendar
+                )
+            )
+        }
+
+        snapshot.awayPeriods = trips
+        return BusyHousehold(snapshot: snapshot, today: busy.today, members: members)
+    }
+
     /// How long `work` took.
     private func duration(of work: () throws -> Void) rethrows -> TimeInterval {
         let started = Date()
@@ -367,6 +411,80 @@ struct HotPathTests {
 
         #expect(household.count == perMember.count)
         #expect(Set(perMember.map(\.id)).count == perMember.count)
+    }
+
+    @Test("The agenda stays fast on two years of being somewhere else")
+    func agendaIsFastWithManyAwayPeriods() throws {
+        // The trips running today are resolved once per agenda rather than per
+        // chore. Asking the whole travel history inside the loop would put a
+        // scan of every holiday the family has taken into every row on the
+        // home screen, for the sake of a list that is usually empty.
+        let busy = try withAwayPeriods(try makeBusyHousehold())
+        var rows = 0
+
+        #expect(busy.snapshot.awayPeriods.count > 100)
+
+        let elapsed = duration {
+            rows = busy.snapshot.agenda(for: busy.today, memberID: busy.members[1].id).count
+        }
+
+        #expect(rows > 0)
+        #expect(elapsed < 1.0)
+    }
+
+    @Test("A streak stays fast on two years of being somewhere else")
+    func streaksAreFastWithManyAwayPeriods() throws {
+        let busy = try withAwayPeriods(try makeBusyHousehold())
+        var length = 0
+
+        let elapsed = duration {
+            length =
+                busy.snapshot.streaks
+                .streak(forMember: busy.members[1].id, asOf: busy.today).length
+        }
+
+        #expect(length > 0)
+        #expect(elapsed < 2.0)
+    }
+
+    @Test("A recap stays fast on two years of being somewhere else")
+    func recapIsFastWithManyAwayPeriods() throws {
+        let busy = try withAwayPeriods(try makeBusyHousehold())
+        var scheduled = 0
+
+        let elapsed = duration {
+            scheduled =
+                busy.snapshot.insights
+                .weeklyRecap(forWeekContaining: busy.today)
+                .scheduled
+        }
+
+        #expect(scheduled > 0)
+        #expect(elapsed < 2.0)
+    }
+
+    @Test("A travel history changes nothing about a day nobody was away")
+    func awayPeriodsLeaveOrdinaryDaysAlone() throws {
+        // Speed is only worth having if the answer is unchanged. Every trip in
+        // this fixture is behind today, so today's agenda and today's fairness
+        // must read exactly as they do without any of them.
+        let plain = try makeBusyHousehold()
+        let travelled = try withAwayPeriods(plain)
+
+        #expect(
+            plain.snapshot.agenda(for: plain.today).map(\.id)
+                == travelled.snapshot.agenda(for: travelled.today).map(\.id)
+        )
+        #expect(
+            plain.snapshot.agenda(for: plain.today).contains { $0.isAway } == false
+        )
+        #expect(
+            plain.snapshot.insights.workloadBalance(from: plain.today, to: plain.today).shares
+                .map(\.occurrences)
+                == travelled.snapshot.insights
+                .workloadBalance(from: travelled.today, to: travelled.today).shares
+                .map(\.occurrences)
+        )
     }
 
     @Test("A member's streak stays fast on two years of history")
