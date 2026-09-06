@@ -72,6 +72,14 @@ public enum DomainError: Error, Equatable, Sendable {
     /// such as a weekly rule with no weekdays selected.
     case unsatisfiableRecurrence(reason: String)
 
+    /// A stretch of days was described in a way that cannot be honoured — back
+    /// to front, or longer than the app is willing to hold.
+    ///
+    /// Carries the reason rather than the dates, because the only useful thing
+    /// to put in front of somebody who has just typed them is what is wrong
+    /// with them.
+    case impossibleDateRange(reason: String)
+
     /// The chore does not fall on the day it was asked about.
     ///
     /// Raised when an occurrence is acted on that the schedule never produced:
@@ -125,6 +133,7 @@ extension DomainError {
         case eventTitle
         case coverNote
         case redemptionNote
+        case awayReason
         case points
         case quantity
     }
@@ -171,6 +180,7 @@ extension DomainError {
         case manageCalendar
         case requestCover
         case coverForSomeone
+        case manageAwayPeriod
     }
 }
 
@@ -204,6 +214,8 @@ extension DomainError: LocalizedError {
             return "\(feature.label) is part of \(Household.Tier.plus.label)."
         case .unsatisfiableRecurrence(let reason):
             return "This chore would never come up: \(reason)."
+        case .impossibleDateRange(let reason):
+            return "Those dates don't work — \(reason)."
         case .notScheduled:
             return "That chore isn't due on that day."
         case .coverAlreadySettled:
@@ -236,6 +248,7 @@ extension DomainError.Field {
         case .eventTitle: "Event title"
         case .coverNote: "Reason"
         case .redemptionNote: "Note"
+        case .awayReason: "Where"
         case .points: "Points"
         case .quantity: "Quantity"
         }
@@ -265,6 +278,7 @@ extension DomainError.Action {
         case .manageCalendar: "change the calendar"
         case .requestCover: "ask somebody to cover a chore"
         case .coverForSomeone: "cover somebody else's chore"
+        case .manageAwayPeriod: "say who is away"
         }
     }
 }

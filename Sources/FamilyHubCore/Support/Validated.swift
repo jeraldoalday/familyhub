@@ -114,6 +114,12 @@ public enum Limits {
     /// reminder be scheduled beyond the horizon the planner actually plans.
     public static let eventReminderLead: ClosedRange<Int> = 0...(7 * 24 * 60)
 
+    /// How long a single away period may run, counting both ends.
+    ///
+    /// A year and a day, which covers a sabbatical and refuses the mistyped
+    /// year that would otherwise switch a household's rota off until 2035.
+    public static let awayPeriodDays = 366
+
     /// Members allowed in a household on the free tier.
     public static let freeTierMembers = 3
 

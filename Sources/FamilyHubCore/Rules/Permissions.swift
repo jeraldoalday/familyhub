@@ -62,6 +62,17 @@ public enum Permissions {
         // points into another person's balance.
         case .completeOthersChore:
             return role.isAdult
+
+        // Saying who is away is an adult action, and this is the one place in
+        // the app where that rule is about the child rather than about the
+        // money. An away period excuses every chore it covers, which makes it
+        // the only switch in the product that turns the rota off — and the
+        // first thing a nine year old does with a rota is look for one. A
+        // family that genuinely needs a child to record their own trip has an
+        // adult two taps away; a family whose rota can be dismissed from the
+        // inside has no rota.
+        case .manageAwayPeriod:
+            return role.isAdult
         }
     }
 
