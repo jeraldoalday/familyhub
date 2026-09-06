@@ -52,6 +52,9 @@ public struct HouseholdSnapshot: Sendable, Codable {
     /// Requests to swap a single occurrence of a chore, answered or not.
     public var coverRequests: [CoverRequest]
 
+    /// The stretches of days the household, or some of it, is not here.
+    public var awayPeriods: [AwayPeriod]
+
     /// Creates a snapshot.
     public init(
         household: Household,
@@ -65,7 +68,8 @@ public struct HouseholdSnapshot: Sendable, Codable {
         shoppingItems: [ShoppingItem] = [],
         plannedMeals: [PlannedMeal] = [],
         events: [CalendarEvent] = [],
-        coverRequests: [CoverRequest] = []
+        coverRequests: [CoverRequest] = [],
+        awayPeriods: [AwayPeriod] = []
     ) {
         self.household = household
         self.members = members
@@ -79,6 +83,7 @@ public struct HouseholdSnapshot: Sendable, Codable {
         self.plannedMeals = plannedMeals
         self.events = events
         self.coverRequests = coverRequests
+        self.awayPeriods = awayPeriods
     }
 
     /// Decodes a snapshot, tolerating collections a previous build never wrote.
@@ -115,6 +120,8 @@ public struct HouseholdSnapshot: Sendable, Codable {
         self.events = try container.decodeIfPresent([CalendarEvent].self, forKey: .events) ?? []
         self.coverRequests =
             try container.decodeIfPresent([CoverRequest].self, forKey: .coverRequests) ?? []
+        self.awayPeriods =
+            try container.decodeIfPresent([AwayPeriod].self, forKey: .awayPeriods) ?? []
     }
 }
 
@@ -174,6 +181,11 @@ extension HouseholdSnapshot {
     /// Finds a cover request by identifier.
     public func coverRequest(_ id: Identifier<CoverRequest>) -> CoverRequest? {
         coverRequests.first { $0.id == id }
+    }
+
+    /// Finds an away period by identifier.
+    public func awayPeriod(_ id: Identifier<AwayPeriod>) -> AwayPeriod? {
+        awayPeriods.first { $0.id == id }
     }
 
     /// A chore's schedule as a phrase, in this household's week order.
@@ -307,8 +319,28 @@ extension HouseholdSnapshot {
         /// Who took the occurrence on, when somebody did.
         public let coveringMember: Member?
 
+        /// The trip that takes the responsible person out of the house on this
+        /// day, when one does.
+        ///
+        /// Carried rather than used to hide the row, because the household
+        /// still has to know: somebody has to feed the cat, and a chore that
+        /// silently vanished from every list is a chore nobody does. What the
+        /// record changes is who is being *asked* — see
+        /// ``HouseholdSnapshot/agenda(for:memberID:)``.
+        public let awayPeriod: AwayPeriod?
+
         /// Whether somebody else has taken this occurrence on.
         public var isCovered: Bool { coveringMember != nil }
+
+        /// Whether nobody is here to do this one.
+        public var isAway: Bool { awayPeriod != nil }
+
+        /// Whether the row is outstanding work that the household needs to
+        /// find somebody else for.
+        ///
+        /// The state the home screen has no other way to describe: not done,
+        /// not late, and not anybody's fault.
+        public var needsSomebodyElse: Bool { isAway && !isDone }
 
         /// Who the row is actually waiting on: whoever is covering, or the
         /// person the rota named.
@@ -362,6 +394,20 @@ extension HouseholdSnapshot {
         // chore would put a second linear scan inside the loop.
         let coverByOccurrence = coverRequests.acceptedCoversByOccurrence()
 
+        // The trips running today, resolved once. There are never many, and
+        // asking the whole travel history per chore would put a third scan
+        // inside the loop for the sake of a list that is usually empty.
+        let trips = awayPeriods.live(on: normalizedDay, calendar: engine.calendar)
+
+        // A person who is away is not being asked for anything, so their list
+        // is empty rather than full of work they cannot do. Answered before the
+        // walk, because the answer does not depend on the chores: an open chore
+        // that stays on everybody's list is still not on the list of somebody
+        // who is in Spain.
+        if let memberID, trips.contains(where: { $0.covers(memberID) }) {
+            return []
+        }
+
         // Indexed once rather than searched per chore: a household with a
         // year of history has thousands of completions, and a linear scan
         // inside the loop would make the home screen quadratic.
@@ -389,6 +435,15 @@ extension HouseholdSnapshot {
             let cover = coverByOccurrence[key]
             let coveringMemberID = cover?.resolution.coveringMemberID
 
+            // Whoever the row is actually waiting on — the person covering, or
+            // the one the rota named — is the person whose absence excuses it.
+            // An open chore has nobody, so only an empty house excuses one.
+            let responsibleID = coveringMemberID ?? assigneeID
+            let trip =
+                responsibleID
+                .flatMap { id in trips.first { $0.covers(id) } }
+                ?? trips.first(where: \.isWholeHousehold)
+
             if let memberID {
                 // An unassigned chore stays on everyone's list — it is open for
                 // whoever gets to it first, which is the point of leaving it
@@ -414,7 +469,8 @@ extension HouseholdSnapshot {
                     assignee: assigneeID.flatMap(member),
                     completion: completionsByOccurrence[key],
                     cover: cover,
-                    coveringMember: coveringMemberID.flatMap(member)
+                    coveringMember: coveringMemberID.flatMap(member),
+                    awayPeriod: trip
                 )
             )
         }
@@ -423,6 +479,12 @@ extension HouseholdSnapshot {
             // Outstanding work first — a list that opens on a wall of ticks
             // buries the thing the person actually came to do.
             if lhs.isDone != rhs.isDone { return !lhs.isDone }
+            // Among the outstanding, the ones somebody is here for come first.
+            // A row waiting on a person who is in Spain is not something the
+            // household can act on this morning, and putting it at the top of
+            // the home screen every day of the holiday teaches people to scroll
+            // past the part that matters.
+            if lhs.isAway != rhs.isAway { return !lhs.isAway }
             let comparison = lhs.chore.title.value
                 .localizedCaseInsensitiveCompare(rhs.chore.title.value)
             if comparison != .orderedSame { return comparison == .orderedAscending }
@@ -561,5 +623,71 @@ extension HouseholdSnapshot {
     public func liveCoverRequests(on date: Date) -> [CoverRequest] {
         let calendar = household.calendar()
         return coverRequests.open.filter { $0.isLive(on: date, calendar: calendar) }
+    }
+}
+
+// MARK: - Away
+
+extension HouseholdSnapshot {
+    /// Whether `memberID` is away on `day`.
+    ///
+    /// The single question the agenda, the streak calculator, the recap, and
+    /// the reminder planner all ask. Answered here so that four screens cannot
+    /// answer it four ways, which is exactly what happened to "is this mine"
+    /// before the agenda started resolving it.
+    public func isAway(_ memberID: Identifier<Member>, on day: Date) -> Bool {
+        awayPeriods.isAway(memberID, on: day, calendar: household.calendar())
+    }
+
+    /// Whether the house is empty on `day`.
+    ///
+    /// Not the same as everybody being away one at a time: a chore open to
+    /// anybody has somebody to fall to right up until there is nobody left, so
+    /// this is the only case in which an unassigned chore is excused.
+    public func isHouseholdAway(on day: Date) -> Bool {
+        awayPeriods.isHouseholdAway(on: day, calendar: household.calendar())
+    }
+
+    /// The trips running on `day`, in date order.
+    public func awayPeriods(on day: Date) -> [AwayPeriod] {
+        awayPeriods.live(on: day, calendar: household.calendar())
+    }
+
+    /// The members who are not here on `day`, in the household's display order.
+    ///
+    /// What the home screen's "away" strip renders. Resolved against the
+    /// household's own membership so that a trip naming somebody who has since
+    /// left produces a shorter list rather than a missing row.
+    public func membersAway(on day: Date) -> [Member] {
+        let trips = awayPeriods(on: day)
+        guard !trips.isEmpty else { return [] }
+        return activeMembers.filter { member in
+            trips.contains { $0.covers(member.id) }
+        }
+    }
+
+    /// The trips that have not started yet as of `day`, soonest first.
+    ///
+    /// - Parameters:
+    ///   - day: The day to look forward from.
+    ///   - limit: How many to return.
+    /// - Returns: The household's next trips.
+    public func upcomingAwayPeriods(after day: Date, limit: Int = 5) -> [AwayPeriod] {
+        let calendar = household.calendar()
+        return Array(
+            awayPeriods.active
+                .filter { $0.isUpcoming(on: day, calendar: calendar) }
+                .prefix(limit)
+        )
+    }
+
+    /// Requires an away period, throwing if it is gone.
+    ///
+    /// - Throws: ``DomainError/notFound(entity:id:)``.
+    public func requireAwayPeriod(_ id: Identifier<AwayPeriod>) throws -> AwayPeriod {
+        guard let found = awayPeriod(id) else {
+            throw DomainError.notFound(entity: "Away period", id: id.description)
+        }
+        return found
     }
 }
