@@ -1857,7 +1857,191 @@ public struct HouseholdCommands: Sendable {
         return withdrawn
     }
 
+    // MARK: - Away
+
+    /// Records that the household, or some of it, is not here for a stretch of
+    /// days.
+    ///
+    /// Nothing about the chores changes. The schedule, the rota, and the
+    /// skipped days are all untouched; what is written is a record of who was
+    /// not here, which the agenda, the streak calculator, the recap, and the
+    /// reminder planner each read for themselves.
+    ///
+    /// Recording the same trip twice returns the one that already exists. A
+    /// parent tapping again because the screen has not updated has not booked a
+    /// second holiday, and two overlapping records excusing the same fortnight
+    /// is a household that cannot cancel one of them without wondering why
+    /// nothing changed.
+    ///
+    /// - Parameters:
+    ///   - firstDay: The first day away, inclusive.
+    ///   - lastDay: The last day away, inclusive.
+    ///   - householdID: The household going away.
+    ///   - actorID: Who is recording it.
+    ///   - members: Who is away. Empty means the whole household.
+    ///   - reason: Where they have gone, in the family's words.
+    /// - Returns: The recorded trip.
+    /// - Throws: ``DomainError/notPermitted(action:role:)`` unless the actor is
+    ///   an adult, ``DomainError/memberNotInHousehold(_:)`` for somebody who is
+    ///   not here to leave, or ``DomainError/impossibleDateRange(reason:)`` for
+    ///   dates that cannot be honoured.
+    @discardableResult
+    public func goAway(
+        from firstDay: Date,
+        to lastDay: Date,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>,
+        members: Set<Identifier<Member>> = [],
+        reason: String? = nil
+    ) async throws -> AwayPeriod {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireActiveMember(actorID)
+        try Permissions.check(.manageAwayPeriod, for: actor.role)
+
+        let calendar = snapshot.household.calendar()
+        let named = try resolvedMembers(members, in: snapshot)
+
+        let start = calendar.startOfDay(for: firstDay)
+        let end = calendar.startOfDay(for: lastDay)
+        let existing = snapshot.awayPeriods.active.first {
+            $0.firstDay == start && $0.lastDay == end && $0.memberIDs == named
+        }
+        if let existing { return existing }
+
+        let period = try AwayPeriod(
+            householdID: householdID,
+            firstDay: start,
+            lastDay: end,
+            memberIDs: named,
+            reason: reason,
+            createdBy: actorID,
+            createdAt: dateProvider.now,
+            calendar: calendar
+        )
+        try await store.save(period)
+        return period
+    }
+
+    /// Changes when a trip runs, who it covers, or what it is called.
+    ///
+    /// - Parameters:
+    ///   - periodID: The trip being edited.
+    ///   - householdID: The household it belongs to.
+    ///   - actorID: Who is editing it.
+    ///   - firstDay: A new first day, or `nil` to keep the one it has.
+    ///   - lastDay: A new last day, or `nil` to keep the one it has.
+    ///   - members: A new set of people, or `nil` to keep the ones it names.
+    ///   - reason: A new reason. Passing `.some(nil)` clears it; omitting the
+    ///     argument leaves it alone.
+    /// - Returns: The edited trip.
+    /// - Throws: Whatever the initialiser refuses, plus
+    ///   ``DomainError/notPermitted(action:role:)``.
+    @discardableResult
+    public func updateAwayPeriod(
+        _ periodID: Identifier<AwayPeriod>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>,
+        firstDay: Date? = nil,
+        lastDay: Date? = nil,
+        members: Set<Identifier<Member>>? = nil,
+        reason: String?? = nil
+    ) async throws -> AwayPeriod {
+        try await updatingAwayPeriod(periodID, in: householdID, by: actorID) { period, snapshot in
+            var updated = try period.rescheduled(
+                firstDay: firstDay,
+                lastDay: lastDay,
+                calendar: snapshot.household.calendar()
+            )
+            if let members {
+                updated = updated.covering(try resolvedMembers(members, in: snapshot))
+            }
+            if let reason {
+                updated = try updated.withReason(reason)
+            }
+            return updated
+        }
+    }
+
+    /// Calls a trip off, so its days count again.
+    ///
+    /// Cancelled rather than deleted. A household that cancels a holiday wants
+    /// the fortnight back on the rota, and it also wants to be able to say what
+    /// happened — a record that vanished would leave the family looking at a
+    /// week of chores that were excused yesterday and are not today, with
+    /// nothing on any screen to explain it.
+    ///
+    /// - Returns: The cancelled trip.
+    @discardableResult
+    public func cancelAwayPeriod(
+        _ periodID: Identifier<AwayPeriod>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> AwayPeriod {
+        try await updatingAwayPeriod(periodID, in: householdID, by: actorID) { period, _ in
+            period.cancelled(at: dateProvider.now)
+        }
+    }
+
+    /// Puts a cancelled trip back on.
+    ///
+    /// - Returns: The reinstated trip.
+    @discardableResult
+    public func reinstateAwayPeriod(
+        _ periodID: Identifier<AwayPeriod>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>
+    ) async throws -> AwayPeriod {
+        try await updatingAwayPeriod(periodID, in: householdID, by: actorID) { period, _ in
+            period.reinstated()
+        }
+    }
+
     // MARK: - Shared plumbing
+
+    /// Loads a trip, applies a transform, and saves the result.
+    ///
+    /// The three editing commands differ only in the transform, and sharing the
+    /// load-check-save is what keeps the permission check from being present on
+    /// two of them and missing from the third.
+    private func updatingAwayPeriod(
+        _ periodID: Identifier<AwayPeriod>,
+        in householdID: Identifier<Household>,
+        by actorID: Identifier<Member>,
+        _ transform: (AwayPeriod, HouseholdSnapshot) throws -> AwayPeriod
+    ) async throws -> AwayPeriod {
+        let snapshot = try await store.snapshot(of: householdID)
+        let actor = try snapshot.requireActiveMember(actorID)
+        try Permissions.check(.manageAwayPeriod, for: actor.role)
+
+        let period = try snapshot.requireAwayPeriod(periodID)
+        let updated = try transform(period, snapshot)
+        try await store.save(updated)
+        return updated
+    }
+
+    /// Checks that everybody named on a trip is somebody who could go on one,
+    /// and collapses "all of them" into the family holiday it is.
+    ///
+    /// The collapse matters because the two are not the same record downstream:
+    /// a chore open to anybody is excused by an empty house and by nothing
+    /// else, so a trip that listed every member by name would leave the
+    /// dishwasher on the agenda of a household that is in Spain. Naming
+    /// everybody is how a person says "all of us" to a picker, and the record
+    /// should mean what they said.
+    private func resolvedMembers(
+        _ members: Set<Identifier<Member>>,
+        in snapshot: HouseholdSnapshot
+    ) throws -> Set<Identifier<Member>> {
+        guard !members.isEmpty else { return [] }
+        for memberID in members {
+            // Active, not merely on file. A trip naming somebody who has moved
+            // out excuses chores that are nobody's, for a person who is not
+            // coming back.
+            _ = try snapshot.requireActiveMember(memberID)
+        }
+        let everybody = Set(snapshot.activeMembers.map(\.id))
+        return members == everybody ? [] : members
+    }
 
     /// Refuses an operation the household's plan does not include.
     ///
