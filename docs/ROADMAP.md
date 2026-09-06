@@ -5,7 +5,7 @@ Two weeks, from a tested domain core to something submittable to App Review.
 ## Where things stand
 
 **Day 1 is done, and then some.** The domain and store layers are complete and
-tested: 990 tests covering recurrence, chore rotation, permissions, the points
+tested: 1,003 tests covering recurrence, chore rotation, permissions, the points
 ledger, shopping lists, streaks, the weekly recap, workload fairness, reminder
 planning, meal planning, the family calendar, household-wide search, covering
 each other's chores, tracking a redeemed reward until somebody actually hands
@@ -159,7 +159,8 @@ break, the afternoon nudge to whoever is cooking, the Sunday prompt about next
 week's undecided dinners, the appointment that outranks all of them, the ask
 from somebody who needs their chore covered today, the reward a child paid for
 nine days ago and is still waiting on, the silence owed to anybody who is not
-at home, and the per-person daily cap that keeps the channel from being
+at home, the warning the evening before somebody leaves, and the per-person
+daily cap that keeps the channel from being
 switched off. What is left is the platform
 half — authorisation, translating each `Reminder` into a
 `UNNotificationRequest`, and re-planning on launch and on change. Smaller than

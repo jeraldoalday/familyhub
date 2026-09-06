@@ -47,7 +47,7 @@ The domain and store layers build and test with nothing but the Swift toolchain:
 
 ```bash
 make check      # build + test + lint + release build — the pre-commit gate
-make test       # 990 tests
+make test       # 1,003 tests
 make format     # reformat in place
 make lint       # the exact formatting check CI runs
 make release    # the optimised build CI also runs
@@ -121,7 +121,7 @@ docs/
 | Tracking a redeemed reward until it is actually handed over | ✅ complete, tested |
 | Shopping lists with aisle grouping | ✅ complete, tested |
 | Working out an item's aisle from its name | ✅ complete, tested |
-| Search across chores, people, meals, lists, and the calendar | ✅ complete, tested |
+| Search across chores, people, meals, lists, trips, and the calendar | ✅ complete, tested |
 | Adding a whole shopping list by pasting it | ✅ complete, tested |
 | Sending a list to somebody who hasn't got the app | ✅ complete, tested |
 | Asking somebody to cover a chore, for one day | ✅ complete, tested |
@@ -133,6 +133,7 @@ docs/
 | A holiday that breaks no streak and spoils no recap | ✅ complete, tested |
 | Weekly recap and workload fairness | ✅ complete, tested |
 | Reminder planning (what to say, and when) | ✅ complete, tested |
+| Warning the adults the evening before somebody leaves | ✅ complete, tested |
 | Schema versioning and backup migration | ✅ complete, tested |
 | Command layer over the store | ✅ complete, tested |
 | Change feed and snapshot observation | ✅ complete, tested |
