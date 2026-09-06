@@ -68,6 +68,14 @@ public struct StreakCalculator: Sendable {
     /// rather than a scan.
     private let completed: Set<ChoreCompletion.OccurrenceKey>
 
+    /// The trips that have not been called off.
+    ///
+    /// Held rather than looked up, and held already filtered, because every
+    /// walk in this type asks about them once per day it steps over. There are
+    /// never many — a household takes a handful of holidays a year — so a scan
+    /// of them is cheaper than the index that would avoid it.
+    private let awayPeriods: [AwayPeriod]
+
     /// How far back any single query will walk before giving up.
     ///
     /// Half a year of daily chores. Long enough that no real household reaches
@@ -85,12 +93,19 @@ public struct StreakCalculator: Sendable {
     ///     occurrence collapse, so neither a rejected day nor a synced
     ///     duplicate can count toward a run.
     ///   - engine: The recurrence engine for this household.
+    ///   - awayPeriods: The household's trips. Days they cover neither extend a
+    ///     run nor break it, on exactly the argument a day with nothing
+    ///     assigned is already neutral: a child cannot be judged on a day the
+    ///     household did not ask anything of them, and it did not ask anything
+    ///     of them from a hotel.
     public init(
         chores: some Collection<Chore>,
         completions: some Collection<ChoreCompletion>,
-        engine: RecurrenceEngine
+        engine: RecurrenceEngine,
+        awayPeriods: some Collection<AwayPeriod> = EmptyCollection<AwayPeriod>()
     ) {
         self.engine = engine
+        self.awayPeriods = awayPeriods.filter(\.isActive)
         self.chores = chores.filter(\.isActive)
         // Filtered before deduplicating, not after. Deduplication keeps the
         // earliest record of an occurrence, so a day that was ticked off, sent
@@ -131,16 +146,28 @@ public struct StreakCalculator: Sendable {
 
         var index = occurrences.count - 1
         // Today's occurrence, still undone, is neither a hit nor a miss.
-        if occurrences[index] == today, !isDone(chore, on: today) {
+        if occurrences[index].day == today, !isDone(chore, on: today) {
             index -= 1
         }
 
         var length = 0
         var lastDay: Date?
-        while index >= 0, isDone(chore, on: occurrences[index]) {
-            if lastDay == nil { lastDay = occurrences[index] }
-            length += 1
+        while index >= 0 {
+            let occurrence = occurrences[index]
             index -= 1
+
+            // Done first, so a chore somebody did anyway on a day they were
+            // away still counts. Being away excuses the work; it does not
+            // refuse the credit for having done it.
+            if isDone(chore, on: occurrence.day) {
+                if lastDay == nil { lastDay = occurrence.day }
+                length += 1
+                continue
+            }
+            // Nobody was here to do it, so it is stepped over rather than
+            // counted against the run.
+            if isExcused(chore, at: occurrence) { continue }
+            break
         }
 
         return Streak(length: length, lastDay: lastDay, isLive: length > 0)
@@ -165,8 +192,12 @@ public struct StreakCalculator: Sendable {
         for occurrence in occurrences {
             // The final occurrence, if it is today and still open, is not a
             // miss — but it is not yet a hit either, so it simply ends the walk.
-            if occurrence == today, !isDone(chore, on: today) { break }
-            guard isDone(chore, on: occurrence) else {
+            if occurrence.day == today, !isDone(chore, on: today) { break }
+            guard isDone(chore, on: occurrence.day) else {
+                // A day nobody was here for leaves the run exactly as it was,
+                // so a fortnight away joins the weeks either side of it rather
+                // than cutting the record in two.
+                if isExcused(chore, at: occurrence) { continue }
                 run = 0
                 continue
             }
@@ -178,7 +209,7 @@ public struct StreakCalculator: Sendable {
             // last on 4 March" beside a run that counted this morning.
             if run >= best {
                 best = run
-                bestLastDay = occurrence
+                bestLastDay = occurrence.day
             }
         }
 
@@ -231,6 +262,11 @@ public struct StreakCalculator: Sendable {
             guard
                 let cursor = engine.calendar.date(byAdding: .day, value: -offset, to: today)
             else { break }
+
+            // A day they were not here for is skipped over entirely, on the
+            // same terms as a day that asked nothing of them — which, from a
+            // caravan in Wales, is what it was.
+            if isAway(memberID, on: cursor) { continue }
 
             let assigned = assignments[cursor] ?? []
             // A day that asked nothing of them is skipped over entirely.
@@ -304,6 +340,11 @@ public struct StreakCalculator: Sendable {
                         .first
                 else { return nil }
                 guard !isDone(chore, on: today) else { return nil }
+                // A run that today cannot break is not at risk, and telling
+                // somebody on holiday that their streak ends at midnight is
+                // both untrue and the single most annoying notification the app
+                // could send.
+                guard !isExcused(chore, at: occurrence) else { return nil }
 
                 let assigneeID = chore.assignee(forOccurrenceIndex: occurrence.index)
                 if let memberID {
@@ -337,13 +378,49 @@ public struct StreakCalculator: Sendable {
         completed.contains(ChoreCompletion.OccurrenceKey(choreID: chore.id, day: day))
     }
 
+    /// Whether nobody was here to do a given occurrence.
+    ///
+    /// Excused for whoever the rota named that day. A chore open to anybody has
+    /// nobody to name, so only an empty house excuses one — which is the same
+    /// rule the agenda applies, deliberately: a row the home screen showed as
+    /// "nobody is here for this" and a streak that broke on the same night
+    /// would be the app contradicting itself about one square.
+    private func isExcused(
+        _ chore: Chore, at occurrence: RecurrenceEngine.IndexedOccurrence
+    )
+        -> Bool
+    {
+        guard !awayPeriods.isEmpty else { return false }
+        return isAway(
+            chore.assignee(forOccurrenceIndex: occurrence.index),
+            on: occurrence.day
+        )
+    }
+
+    /// Whether `memberID` — or, passed `nil`, the whole household — was away.
+    ///
+    /// A direct scan rather than a call through the collection helpers, which
+    /// sort on the way in. This is asked once per occurrence per query, and the
+    /// order of a handful of trips has no bearing on the answer.
+    private func isAway(_ memberID: Identifier<Member>?, on day: Date) -> Bool {
+        awayPeriods.contains { period in
+            guard period.covers(day, calendar: engine.calendar) else { return false }
+            guard let memberID else { return period.isWholeHousehold }
+            return period.covers(memberID)
+        }
+    }
+
     /// The chore's occurrences from `lookbackDays` before `day` up to and
     /// including it, ascending.
+    ///
+    /// Indexed, because whether an occurrence is excused depends on whose turn
+    /// it was, and the position is what resolves that. The same walk answers
+    /// both, which is the whole reason the engine hands them back together.
     private func pastOccurrences(
         of chore: Chore,
         upTo day: Date,
         lookbackDays: Int
-    ) -> [Date] {
+    ) -> [RecurrenceEngine.IndexedOccurrence] {
         guard
             let earliest = engine.calendar.date(
                 byAdding: .day,
@@ -351,7 +428,11 @@ public struct StreakCalculator: Sendable {
                 to: day
             )
         else { return [] }
-        return chore.occurrences(in: earliest...day, using: engine, maximum: lookbackDays + 1)
+        return chore.indexedOccurrences(
+            in: earliest...day,
+            using: engine,
+            maximum: lookbackDays + 1
+        )
     }
 
     /// The chores assigned specifically to `memberID` on each day of a window.
@@ -389,6 +470,11 @@ extension HouseholdSnapshot {
     /// immutable value, so a calculator cached on it could only ever be stale
     /// in the one case that matters — after a chore has just been ticked off.
     public var streaks: StreakCalculator {
-        StreakCalculator(chores: chores, completions: completions, engine: engine)
+        StreakCalculator(
+            chores: chores,
+            completions: completions,
+            engine: engine,
+            awayPeriods: awayPeriods
+        )
     }
 }
