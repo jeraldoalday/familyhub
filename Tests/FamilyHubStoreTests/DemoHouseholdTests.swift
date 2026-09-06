@@ -294,6 +294,59 @@ struct DemoHouseholdTests {
         }
     }
 
+    // MARK: Away
+
+    @Test("The demo shows both shapes a trip comes in")
+    func demoHasBothKindsOfTrip() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+        let trips = snapshot.awayPeriods.active
+        #expect(trips.count == 2)
+
+        // One child at their grandmother's while the household carries on, and
+        // a family holiday still to come. The two read completely differently
+        // on screen, and a demo showing one of them teaches that the feature
+        // only does that one.
+        #expect(trips.contains { !$0.isWholeHousehold })
+        #expect(trips.contains { $0.isWholeHousehold })
+        #expect(trips.allSatisfy { $0.reason != nil })
+    }
+
+    @Test("The half term is behind them and the holiday is ahead")
+    func demoTripsSitEitherSideOfToday() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+        let trips = snapshot.awayPeriods.active
+
+        let past = try #require(trips.first { !$0.isWholeHousehold })
+        let future = try #require(trips.first { $0.isWholeHousehold })
+
+        #expect(past.hasEnded(on: clock.today, calendar: clock.calendar))
+        #expect(future.isUpcoming(on: clock.today, calendar: clock.calendar))
+        #expect(snapshot.upcomingAwayPeriods(after: clock.today).map(\.id) == [future.id])
+        // Nobody is away today, so the demo's agenda is a working day.
+        #expect(snapshot.membersAway(on: clock.today).isEmpty)
+    }
+
+    @Test("The trip in the past is what explains the demo's own numbers")
+    func demoTripExcusesTheDaysItCovers() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+        let trip = try #require(snapshot.awayPeriods.active.first { !$0.isWholeHousehold })
+        let child = try #require(trip.memberIDs.first)
+
+        #expect(snapshot.isAway(child, on: trip.firstDay))
+        #expect(snapshot.agenda(for: trip.firstDay, memberID: child).isEmpty)
+        // The rest of the household was still here that day.
+        #expect(!snapshot.agenda(for: trip.firstDay).isEmpty)
+    }
+
+    @Test("Everybody named on a trip is somebody still in the household")
+    func demoTripsNameRealMembers() throws {
+        let snapshot = try DemoHousehold.snapshot(asOf: clock)
+        let members = Set(snapshot.activeMembers.map(\.id))
+        for trip in snapshot.awayPeriods {
+            #expect(trip.memberIDs.isSubset(of: members))
+        }
+    }
+
     // MARK: Redemptions
 
     @Test("The demo opens with a reward the household has forgotten to give")

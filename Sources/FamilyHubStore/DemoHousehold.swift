@@ -253,6 +253,42 @@ public enum DemoHousehold {
             )
         }
 
+        // MARK: Away
+
+        // Two trips, because the two shapes read completely differently on
+        // screen and a demo showing one of them would leave whoever is looking
+        // at it believing the feature only does that one. The first is one
+        // child at their grandmother's while the household carries on, which
+        // is the common case and the one that puts an "away" mark on somebody
+        // else's rows without emptying the day. The second is a family holiday
+        // still to come, which is what the upcoming strip is for.
+        //
+        // The half term is in the past deliberately: it is the reason the
+        // recap and the streak on this household read the way they do, and a
+        // demo whose numbers cannot be explained by anything visible in it
+        // teaches the wrong thing about both.
+        let awayPeriods = [
+            try AwayPeriod(
+                householdID: household.id,
+                firstDay: calendar.date(byAdding: .day, value: -9, to: today) ?? today,
+                lastDay: calendar.date(byAdding: .day, value: -6, to: today) ?? today,
+                memberIDs: [sam.id],
+                reason: "At Gran's for half term",
+                createdBy: mary.id,
+                createdAt: calendar.date(byAdding: .day, value: -12, to: today) ?? today,
+                calendar: calendar
+            ),
+            try AwayPeriod(
+                householdID: household.id,
+                firstDay: calendar.date(byAdding: .day, value: 21, to: today) ?? today,
+                lastDay: calendar.date(byAdding: .day, value: 27, to: today) ?? today,
+                reason: "Spain",
+                createdBy: jerald.id,
+                createdAt: yesterday,
+                calendar: calendar
+            ),
+        ]
+
         // MARK: Rewards
 
         let movieNight = try Reward(
@@ -523,7 +559,8 @@ public enum DemoHousehold {
             shoppingItems: shoppingItems,
             plannedMeals: plannedMeals,
             events: calendarEvents + [piano],
-            coverRequests: coverRequests
+            coverRequests: coverRequests,
+            awayPeriods: awayPeriods
         )
     }
 
