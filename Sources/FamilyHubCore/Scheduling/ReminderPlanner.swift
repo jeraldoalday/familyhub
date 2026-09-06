@@ -39,6 +39,27 @@ public struct Reminder: Sendable, Hashable, Identifiable {
         /// A reward somebody paid points for has still not been handed over.
         case rewardOwed(redemptionID: Identifier<Redemption>, others: Int)
 
+        /// Whether the reminder still means anything to somebody who is not at
+        /// home.
+        ///
+        /// Almost nothing does. Every other kind here ends in a request to do
+        /// something in the house — tick a chore off, answer a favour, start
+        /// the dinner, hand a reward over — and a phone that asks for those
+        /// from a hotel is not being helpful, it is being ignored, and after
+        /// four days of it the family switches the channel off for good. The
+        /// two that survive are the two that are not requests: an appointment,
+        /// whose deadline was set by somebody outside the household and does
+        /// not care where the household is, and a birthday, which is the one
+        /// notification in the app that asks for nothing at all.
+        public var survivesBeingAway: Bool {
+            switch self {
+            case .eventSoon, .birthday: true
+            case .choresDue, .streakAtRisk, .approvalsWaiting, .cookingTonight, .mealPlanGaps,
+                .coverRequested, .rewardOwed:
+                false
+            }
+        }
+
         /// How disruptive this kind is allowed to be, lowest first.
         ///
         /// Used to decide what survives the per-person daily cap. The ladder is
@@ -296,7 +317,9 @@ public struct ReminderPlanner: Sendable {
             contentsOf: eveningReminders(on: today, calendar: calendar, streaks: streaks)
         )
 
-        return capped(planned.filter { $0.fireDate > now })
+        return capped(
+            silencedWhileAway(planned.filter { $0.fireDate > now }, on: today, calendar: calendar)
+        )
     }
 
     /// The reminders to register across the next several days.
@@ -726,6 +749,33 @@ public struct ReminderPlanner: Sendable {
                 ),
                 kind: .streakAtRisk(choreID: biggest.chore.id, length: biggest.streak.length)
             )
+        }
+    }
+
+    // MARK: - Away
+
+    /// Drops the reminders that ask something of somebody who is not here.
+    ///
+    /// Applied before the per-person cap rather than after, so that a family on
+    /// holiday does not spend its two-a-day allowance on chores nobody can do
+    /// and then have the one appointment that matters trimmed off the end.
+    ///
+    /// - Parameters:
+    ///   - reminders: Everything planned for the day.
+    ///   - day: The day in question.
+    ///   - calendar: The household's calendar.
+    /// - Returns: The reminders still worth sending.
+    private func silencedWhileAway(
+        _ reminders: [Reminder],
+        on day: Date,
+        calendar: Calendar
+    ) -> [Reminder] {
+        let trips = snapshot.awayPeriods.live(on: day, calendar: calendar)
+        guard !trips.isEmpty else { return reminders }
+
+        return reminders.filter { reminder in
+            guard trips.contains(where: { $0.covers(reminder.recipientID) }) else { return true }
+            return reminder.kind.survivesBeingAway
         }
     }
 
