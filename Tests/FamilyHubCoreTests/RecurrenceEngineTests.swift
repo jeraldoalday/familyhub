@@ -233,6 +233,75 @@ struct RecurrenceEngineTests {
         #expect(days(result) == ["2026-01-01", "2026-04-01", "2026-07-01", "2026-10-01"])
     }
 
+    // MARK: - Yearly
+
+    @Test("A yearly chore lands on the start date's own month and day")
+    func yearlyRepeatsTheStartDate() {
+        let start = date(2026, 3, 2)
+        let result = engine.occurrences(
+            of: .yearly,
+            startingOn: start,
+            in: start...date(2029, 12, 31)
+        )
+        #expect(days(result) == ["2026-03-02", "2027-03-02", "2028-03-02", "2029-03-02"])
+    }
+
+    @Test("An interval skips the years in between")
+    func yearlyHonoursItsInterval() {
+        let result = engine.occurrences(
+            of: .everyYears(3),
+            startingOn: date(2026, 6, 14),
+            in: date(2026, 1, 1)...date(2034, 1, 1)
+        )
+        #expect(days(result) == ["2026-06-14", "2029-06-14", "2032-06-14"])
+    }
+
+    @Test("A leap-day chore skips the years that have no 29 February")
+    func yearlySkipsCommonYears() {
+        // Started on a leap day, so the three years that follow have nowhere to
+        // put it. Rolling it onto 1 March would land the chore on a date the
+        // family never chose — and on top of anything they did choose there.
+        let result = engine.occurrences(
+            of: .yearly,
+            startingOn: date(2028, 2, 29),
+            in: date(2028, 1, 1)...date(2037, 1, 1)
+        )
+        #expect(days(result) == ["2028-02-29", "2032-02-29", "2036-02-29"])
+    }
+
+    @Test("A leap-day chore asked about one common year answers nothing, quickly")
+    func yearlyLeapDayInOneCommonYear() {
+        let result = engine.occurrences(
+            of: .yearly,
+            startingOn: date(2028, 2, 29),
+            in: date(2029, 1, 1)...date(2029, 12, 31)
+        )
+        #expect(result.isEmpty)
+    }
+
+    @Test("A yearly chore honours an end date and an occurrence limit")
+    func yearlyRespectsBounds() throws {
+        let start = date(2026, 3, 2)
+        let limited = try RecurrenceRule.yearly.limited(to: 2)
+        #expect(
+            days(engine.occurrences(of: limited, startingOn: start, in: start...date(2040, 1, 1)))
+                == ["2026-03-02", "2027-03-02"]
+        )
+
+        let ending = try RecurrenceRule.yearly.ending(on: date(2028, 1, 1))
+        #expect(
+            days(engine.occurrences(of: ending, startingOn: start, in: start...date(2040, 1, 1)))
+                == ["2026-03-02", "2027-03-02"]
+        )
+    }
+
+    @Test("The next yearly occurrence is a year away, not a day")
+    func nextYearlyOccurrence() {
+        let start = date(2026, 3, 2)
+        let next = engine.nextOccurrence(of: .yearly, startingOn: start, after: start)
+        #expect(next == date(2027, 3, 2))
+    }
+
     // MARK: - Bounds
 
     @Test("An end date stops the sequence")
@@ -457,6 +526,13 @@ struct RecurrenceEngineTests {
         #expect(Weekday.weekdays.summary(firstWeekday: 2) == "Weekdays")
         #expect(Weekday.weekend.summary(firstWeekday: 2) == "Weekends")
         #expect(Set<Weekday>().summary(firstWeekday: 2) == "Never")
+    }
+
+    @Test("A yearly rule describes itself without repeating the start date")
+    func yearlySummary() {
+        #expect(RecurrenceRule.yearly.summary(firstWeekday: 2) == "Yearly")
+        #expect(RecurrenceRule.everyYears(2).summary(firstWeekday: 2) == "Every 2 years")
+        #expect(RecurrenceRule.yearly.isRepeating)
     }
 
     @Test("An interval keeps the week order inside the phrase")

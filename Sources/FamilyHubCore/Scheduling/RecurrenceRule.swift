@@ -25,6 +25,15 @@ public struct RecurrenceRule: Hashable, Sendable, Codable {
 
         /// On the selected days of the month, every `interval` months.
         case monthly
+
+        /// On the start date's own month and day, every `interval` years.
+        ///
+        /// The one cadence with nothing to select. A yearly rule that let a
+        /// family pick a month and a day would be two pickers to say what the
+        /// start date already says, and two places for them to disagree — so
+        /// the anchor *is* the start date, and moving the chore is moving its
+        /// start.
+        case yearly
     }
 
     /// The base cadence.
@@ -81,7 +90,7 @@ public struct RecurrenceRule: Hashable, Sendable, Codable {
 
     private func validate() throws {
         switch frequency {
-        case .once, .daily:
+        case .once, .daily, .yearly:
             break
         case .weekly:
             guard !weekdays.isEmpty else {
@@ -132,6 +141,16 @@ extension RecurrenceRule {
     /// Every `days` days.
     public static func everyDays(_ days: Int) -> RecurrenceRule {
         try! RecurrenceRule(frequency: .daily, interval: days)
+    }
+
+    /// Once a year, on the start date's month and day.
+    public static var yearly: RecurrenceRule {
+        try! RecurrenceRule(frequency: .yearly)
+    }
+
+    /// Every `years` years, on the start date's month and day.
+    public static func everyYears(_ years: Int) -> RecurrenceRule {
+        try! RecurrenceRule(frequency: .yearly, interval: years)
     }
 
     /// On the given weekdays, every week.
@@ -207,6 +226,8 @@ extension RecurrenceRule {
                 return weekdays == Weekday.everyDay ? "Daily" : days
             }
             return "Every \(interval) weeks on \(days)"
+        case .yearly:
+            return interval == 1 ? "Yearly" : "Every \(interval) years"
         case .monthly:
             let days =
                 daysOfMonth

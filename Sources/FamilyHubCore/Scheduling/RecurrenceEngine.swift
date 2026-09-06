@@ -276,6 +276,47 @@ public struct RecurrenceEngine: Sendable {
                 period += 1
             }
 
+        case .yearly:
+            // Anchored to the start date's own month and day rather than to a
+            // stored pair, because a yearly rule has nothing else to be
+            // anchored to and duplicating it would give the two a chance to
+            // disagree after an edit.
+            let anchor = calendar.dateComponents([.year, .month, .day], from: startDay)
+            guard let anchorYear = anchor.year,
+                let month = anchor.month,
+                let day = anchor.day
+            else { return }
+
+            var period = 0
+            while period < Self.periodCeiling {
+                var components = DateComponents()
+                components.year = anchorYear + period * rule.interval
+                components.month = month
+                components.day = day
+                period += 1
+
+                guard let date = calendar.date(from: components) else { return }
+
+                // A rule anchored on 29 February does not land in a common
+                // year, and Foundation rolls the request forward to 1 March
+                // rather than refusing it. Dropped rather than rolled, on the
+                // same argument the monthly case drops the 31st: a chore the
+                // family set for the leap day must not quietly arrive on a
+                // different date three years in four and collide with whatever
+                // they had already put on the 1st.
+                let produced = calendar.dateComponents([.month, .day], from: date)
+                guard produced.month == month, produced.day == day else {
+                    // Still bounded by the horizon, so a leap-day rule asked
+                    // about a single common year stops rather than walking the
+                    // ceiling looking for a February that has a 29th.
+                    guard date <= effectiveHorizon else { return }
+                    continue
+                }
+
+                guard date <= effectiveHorizon else { return }
+                if emit(date) == .stop { return }
+            }
+
         case .monthly:
             guard let anchorMonth = calendar.dateInterval(of: .month, for: startDay)?.start
             else { return }
