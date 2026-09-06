@@ -107,6 +107,13 @@ public protocol HouseholdStore: Sendable {
     /// rather than two arrangements the household has to reconcile.
     func save(_ request: CoverRequest) async throws
 
+    /// Inserts or replaces an away period.
+    ///
+    /// Written by identifier like everything else, so two parents recording the
+    /// same holiday from two phones converge on one trip rather than on two
+    /// overlapping ones that each excuse the same fortnight.
+    func save(_ period: AwayPeriod) async throws
+
     // MARK: Deleting
 
     /// Permanently removes a chore and its completions.
@@ -179,6 +186,13 @@ extension HouseholdStore {
     public func save(coverRequests: [CoverRequest]) async throws {
         for request in coverRequests {
             try await save(request)
+        }
+    }
+
+    /// Saves several away periods in one go.
+    public func save(awayPeriods: [AwayPeriod]) async throws {
+        for period in awayPeriods {
+            try await save(period)
         }
     }
 

@@ -186,7 +186,7 @@ struct RedemptionStoreTests {
         let archive = try await f.store.archive(f.household.id, exportedAt: clock.now)
         let restored = try HouseholdArchive.decoded(from: try archive.encoded())
 
-        #expect(restored.schemaVersion == 5)
+        #expect(restored.schemaVersion == FamilyHubStore.schemaVersion)
         #expect(Set(restored.snapshot.redemptions) == Set([owed, given]))
         #expect(restored.snapshot.owedRedemptions.map(\.id) == [owed.id])
     }

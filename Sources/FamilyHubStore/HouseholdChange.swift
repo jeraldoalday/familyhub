@@ -31,6 +31,7 @@ public struct HouseholdChange: Sendable, Hashable {
         case plannedMeal
         case calendarEvent
         case coverRequest
+        case awayPeriod
     }
 
     /// What happened to it.
@@ -85,9 +86,11 @@ public struct HouseholdChange: Sendable, Hashable {
     /// A cover request belongs here because an accepted one moves a chore from
     /// one person's list to another's, which is precisely a change to what the
     /// agenda shows.
+    /// An away period belongs here for the same reason: it decides whose list
+    /// a chore is on, and whether the row says anybody is here to do it.
     public var affectsAgenda: Bool {
         switch entity {
-        case .household, .member, .chore, .completion, .coverRequest: true
+        case .household, .member, .chore, .completion, .coverRequest, .awayPeriod: true
         case .ledgerEntry, .reward, .redemption, .shoppingList, .shoppingItem, .plannedMeal,
             .calendarEvent:
             false
@@ -105,7 +108,7 @@ public struct HouseholdChange: Sendable, Hashable {
         switch entity {
         case .ledgerEntry, .completion, .member: true
         case .household, .chore, .reward, .redemption, .shoppingList, .shoppingItem, .plannedMeal,
-            .calendarEvent, .coverRequest:
+            .calendarEvent, .coverRequest, .awayPeriod:
             false
         }
     }
@@ -124,7 +127,8 @@ public struct HouseholdChange: Sendable, Hashable {
     public var affectsRewards: Bool {
         switch entity {
         case .reward, .redemption, .ledgerEntry, .completion, .member, .household: true
-        case .chore, .shoppingList, .shoppingItem, .plannedMeal, .calendarEvent, .coverRequest:
+        case .chore, .shoppingList, .shoppingItem, .plannedMeal, .calendarEvent, .coverRequest,
+            .awayPeriod:
             false
         }
     }
@@ -139,7 +143,7 @@ public struct HouseholdChange: Sendable, Hashable {
         switch entity {
         case .plannedMeal, .member, .household: true
         case .chore, .completion, .ledgerEntry, .reward, .redemption, .shoppingList,
-            .shoppingItem, .calendarEvent, .coverRequest:
+            .shoppingItem, .calendarEvent, .coverRequest, .awayPeriod:
             false
         }
     }
@@ -155,7 +159,7 @@ public struct HouseholdChange: Sendable, Hashable {
         switch entity {
         case .calendarEvent, .member, .household: true
         case .chore, .completion, .ledgerEntry, .reward, .redemption, .shoppingList,
-            .shoppingItem, .plannedMeal, .coverRequest:
+            .shoppingItem, .plannedMeal, .coverRequest, .awayPeriod:
             false
         }
     }
@@ -251,6 +255,15 @@ extension HouseholdChange {
             householdID: request.householdID,
             entity: .coverRequest,
             recordID: request.id.rawValue
+        )
+    }
+
+    /// The change recording that `period` was written.
+    public static func upserted(_ period: AwayPeriod) -> HouseholdChange {
+        HouseholdChange(
+            householdID: period.householdID,
+            entity: .awayPeriod,
+            recordID: period.id.rawValue
         )
     }
 

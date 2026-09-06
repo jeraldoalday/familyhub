@@ -111,20 +111,25 @@ public struct HouseholdArchive: Sendable, Codable {
     ///
     /// The seam was built at version 1, when it was the identity, on the
     /// argument that discovering at version 2 that every restore path assumed
-    /// the current shape produces a migration written under pressure. Three
-    /// versions later the argument has held three times: each step is a line in
+    /// the current shape produces a migration written under pressure. Four
+    /// versions later the argument has held four times: each step is a line in
     /// a switch because the decision it needed was made before it was needed.
     ///
     /// Version 1 predates the meal plan, version 2 the family calendar,
-    /// version 3 the cover requests, and version 4 the redemption records. In
-    /// every case the missing collection is not a gap to be filled in but the
-    /// truth about that household — there was no calendar to have — so
-    /// migrating is restamping the version rather than transforming the
-    /// contents. A version 4 household is not one whose rewards were never
-    /// redeemed, but one whose redemptions were settled, or not, out in the
-    /// world where the app could not see them; inventing records for the ledger
-    /// entries would fill the family's queue with films they watched in
-    /// February and tell them they are owed. That is only true because
+    /// version 3 the cover requests, version 4 the redemption records, and
+    /// version 5 the away periods. In every case the missing collection is not
+    /// a gap to be filled in but the truth about that household — there was no
+    /// calendar to have — so migrating is restamping the version rather than
+    /// transforming the contents. A version 4 household is not one whose
+    /// rewards were never redeemed, but one whose redemptions were settled, or
+    /// not, out in the world where the app could not see them; inventing
+    /// records for the ledger entries would fill the family's queue with films
+    /// they watched in February and tell them they are owed. A version 5
+    /// household is the same argument about holidays: its history contains
+    /// weeks where every chore was missed at once, and that shape describes
+    /// both a fortnight in Spain and a fortnight the family stopped using the
+    /// app. Guessing between them would rewrite what a household did. That is
+    /// only true because
     /// ``HouseholdSnapshot`` decodes an absent collection as an empty one; if
     /// it threw instead, every one of these steps would have to rebuild the
     /// snapshot by hand.
@@ -136,7 +141,7 @@ public struct HouseholdArchive: Sendable, Codable {
         switch schemaVersion {
         case FamilyHubStore.schemaVersion:
             return self
-        case 1, 2, 3, 4:
+        case 1, 2, 3, 4, 5:
             return HouseholdArchive(
                 snapshot: snapshot,
                 exportedAt: exportedAt,
@@ -330,5 +335,6 @@ extension HouseholdStore {
         try await save(meals: snapshot.plannedMeals)
         try await save(events: snapshot.events)
         try await save(coverRequests: snapshot.coverRequests)
+        try await save(awayPeriods: snapshot.awayPeriods)
     }
 }

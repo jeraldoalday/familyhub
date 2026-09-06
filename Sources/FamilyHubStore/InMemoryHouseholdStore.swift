@@ -25,6 +25,7 @@ public actor InMemoryHouseholdStore: HouseholdStore {
     private var plannedMealsByID: [Identifier<PlannedMeal>: PlannedMeal] = [:]
     private var eventsByID: [Identifier<CalendarEvent>: CalendarEvent] = [:]
     private var coverRequestsByID: [Identifier<CoverRequest>: CoverRequest] = [:]
+    private var awayPeriodsByID: [Identifier<AwayPeriod>: AwayPeriod] = [:]
 
     /// Open change-feed subscriptions, keyed by a token so each can be removed
     /// when its consumer stops iterating.
@@ -63,6 +64,7 @@ public actor InMemoryHouseholdStore: HouseholdStore {
         for meal in seed.plannedMeals { plannedMealsByID[meal.id] = meal }
         for event in seed.events { eventsByID[event.id] = event }
         for request in seed.coverRequests { coverRequestsByID[request.id] = request }
+        for period in seed.awayPeriods { awayPeriodsByID[period.id] = period }
     }
 
     // MARK: Reading
@@ -83,7 +85,8 @@ public actor InMemoryHouseholdStore: HouseholdStore {
             shoppingItems: shoppingItemsByID.values.filter { $0.householdID == householdID },
             plannedMeals: plannedMealsByID.values.filter { $0.householdID == householdID },
             events: eventsByID.values.filter { $0.householdID == householdID },
-            coverRequests: coverRequestsByID.values.filter { $0.householdID == householdID }
+            coverRequests: coverRequestsByID.values.filter { $0.householdID == householdID },
+            awayPeriods: awayPeriodsByID.values.filter { $0.householdID == householdID }
         )
     }
 
@@ -155,6 +158,11 @@ public actor InMemoryHouseholdStore: HouseholdStore {
         publish(.upserted(request))
     }
 
+    public func save(_ period: AwayPeriod) {
+        awayPeriodsByID[period.id] = period
+        publish(.upserted(period))
+    }
+
     // MARK: Deleting
 
     public func deleteChore(_ id: Identifier<Chore>) {
@@ -211,6 +219,7 @@ public actor InMemoryHouseholdStore: HouseholdStore {
         plannedMealsByID = plannedMealsByID.filter { $0.value.householdID != id }
         eventsByID = eventsByID.filter { $0.value.householdID != id }
         coverRequestsByID = coverRequestsByID.filter { $0.value.householdID != id }
+        awayPeriodsByID = awayPeriodsByID.filter { $0.value.householdID != id }
 
         // One change for the whole household rather than one per orphaned
         // record. A subscriber's only reaction is to reload, and reloading a
@@ -276,6 +285,6 @@ public actor InMemoryHouseholdStore: HouseholdStore {
             + ledgerEntriesByID.count + rewardsByID.count + redemptionsByID.count
             + shoppingListsByID.count
             + shoppingItemsByID.count + plannedMealsByID.count + eventsByID.count
-            + coverRequestsByID.count
+            + coverRequestsByID.count + awayPeriodsByID.count
     }
 }

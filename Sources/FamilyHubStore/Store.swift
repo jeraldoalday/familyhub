@@ -20,12 +20,22 @@ public enum FamilyHubStore {
     /// still be understood by a build shipped a year from now.
     /// Version 2 added the meal plan, version 3 the family calendar, version 4
     /// the cover requests that let one person take a chore off another for a
-    /// day, and version 5 the redemption records that say whether a reward
-    /// somebody spent points on was ever actually handed over. Older archives
+    /// day, version 5 the redemption records that say whether a reward somebody
+    /// spent points on was ever actually handed over, and version 6 the away
+    /// periods that record the days a household was not at home. Older archives
     /// restore unchanged: a household that had no meal plan is a household with
     /// no planned meals, no calendar is no events, no cover requests is a
-    /// household that swapped chores across the kitchen instead, and no
-    /// redemptions is a household whose rewards were settled — or not — outside
-    /// the app. Which is exactly what the migration produces.
-    public static let schemaVersion = 5
+    /// household that swapped chores across the kitchen instead, no redemptions
+    /// is a household whose rewards were settled — or not — outside the app,
+    /// and no away periods is a household whose holidays are still recorded as
+    /// a fortnight of missed chores. Which is exactly what the migration
+    /// produces.
+    ///
+    /// The last of those is worth stating plainly, because it is the one a
+    /// migration could plausibly be tempted to guess at. A restored version 5
+    /// household has weeks in it where every chore was missed at once, and
+    /// inventing a trip from that shape would rewrite a family's history on
+    /// the strength of a pattern that also describes the fortnight they simply
+    /// stopped using the app.
+    public static let schemaVersion = 6
 }
