@@ -39,6 +39,9 @@ public struct Reminder: Sendable, Hashable, Identifiable {
         /// A reward somebody paid points for has still not been handed over.
         case rewardOwed(redemptionID: Identifier<Redemption>, others: Int)
 
+        /// Somebody leaves tomorrow and their chores have nobody.
+        case leavingTomorrow(periodID: Identifier<AwayPeriod>, chores: Int)
+
         /// Whether the reminder still means anything to somebody who is not at
         /// home.
         ///
@@ -55,7 +58,7 @@ public struct Reminder: Sendable, Hashable, Identifiable {
             switch self {
             case .eventSoon, .birthday: true
             case .choresDue, .streakAtRisk, .approvalsWaiting, .cookingTonight, .mealPlanGaps,
-                .coverRequested, .rewardOwed:
+                .coverRequested, .rewardOwed, .leavingTomorrow:
                 false
             }
         }
@@ -75,6 +78,13 @@ public struct Reminder: Sendable, Hashable, Identifiable {
         /// birthday and above a list of chores that is also visible on the home
         /// screen.
         ///
+        /// Somebody leaving tomorrow with chores nobody has picked up sits under
+        /// the cover ask and above the cook. It is the same shape of problem —
+        /// work with nobody attached to it — but it is a week of it rather than
+        /// an evening, and it is the last moment the household can do anything
+        /// about it cheaply: after tonight, arranging cover means phoning
+        /// somebody who is on a plane.
+        ///
         /// A cover request sits just under a streak because it is the only kind
         /// here that another person is waiting on. Unanswered, it is not one
         /// evening that goes wrong but two: the chore does not get done, and
@@ -89,9 +99,10 @@ public struct Reminder: Sendable, Hashable, Identifiable {
         /// time it is raised at all it has been waiting days.
         public var priority: Int {
             switch self {
-            case .eventSoon: 8
-            case .streakAtRisk: 7
-            case .coverRequested: 6
+            case .eventSoon: 9
+            case .streakAtRisk: 8
+            case .coverRequested: 7
+            case .leavingTomorrow: 6
             case .cookingTonight: 5
             case .approvalsWaiting: 4
             case .rewardOwed: 3
@@ -197,6 +208,13 @@ public struct ReminderSchedule: Hashable, Sendable, Codable {
     /// also carries the dentist appointment.
     public var sendsRewardReminders: Bool
 
+    /// Whether adults are warned the evening before somebody goes away.
+    ///
+    /// The one reminder here about a day that has not happened yet, which is
+    /// exactly why it is worth sending: after tonight, arranging cover for the
+    /// bins means phoning a person who is on a plane.
+    public var sendsAwayReminders: Bool
+
     /// Whether calendar events are allowed to interrupt anybody.
     ///
     /// Only events that asked to are sent regardless — an event's reminder
@@ -216,7 +234,8 @@ public struct ReminderSchedule: Hashable, Sendable, Codable {
         sendsMealReminders: Bool = true,
         sendsEventReminders: Bool = true,
         sendsCoverRequests: Bool = true,
-        sendsRewardReminders: Bool = true
+        sendsRewardReminders: Bool = true,
+        sendsAwayReminders: Bool = true
     ) {
         self.morningHour = min(23, max(0, morningHour))
         self.eveningHour = min(23, max(0, eveningHour))
@@ -228,6 +247,7 @@ public struct ReminderSchedule: Hashable, Sendable, Codable {
         self.sendsEventReminders = sendsEventReminders
         self.sendsCoverRequests = sendsCoverRequests
         self.sendsRewardReminders = sendsRewardReminders
+        self.sendsAwayReminders = sendsAwayReminders
     }
 
     /// Decodes a schedule saved by an older build.
@@ -267,7 +287,10 @@ public struct ReminderSchedule: Hashable, Sendable, Codable {
             ) ?? standard.sendsCoverRequests,
             sendsRewardReminders: try container.decodeIfPresent(
                 Bool.self, forKey: .sendsRewardReminders
-            ) ?? standard.sendsRewardReminders
+            ) ?? standard.sendsRewardReminders,
+            sendsAwayReminders: try container.decodeIfPresent(
+                Bool.self, forKey: .sendsAwayReminders
+            ) ?? standard.sendsAwayReminders
         )
     }
 
@@ -316,6 +339,7 @@ public struct ReminderPlanner: Sendable {
         planned.append(
             contentsOf: eveningReminders(on: today, calendar: calendar, streaks: streaks)
         )
+        planned.append(contentsOf: leavingReminders(on: today, calendar: calendar))
 
         return capped(
             silencedWhileAway(planned.filter { $0.fireDate > now }, on: today, calendar: calendar)
@@ -754,6 +778,89 @@ public struct ReminderPlanner: Sendable {
 
     // MARK: - Away
 
+    /// One reminder per adult when somebody leaves tomorrow and the chores they
+    /// are leaving behind have nobody attached to them.
+    ///
+    /// The only reminder here about a day that has not happened yet, and the
+    /// argument for it is timing rather than novelty. Once the trip has started
+    /// the household's options are to cover the work or to do without it;
+    /// tonight it can also move a chore, skip it on purpose, or ask the person
+    /// leaving to do Friday's on Thursday. After tonight, arranging any of that
+    /// means phoning somebody who is on a plane.
+    ///
+    /// Sent to adults rather than to everybody, because it is a request to
+    /// reorganise the week and that is not a thing a six year old can act on.
+    /// An adult who is themselves leaving is skipped: they are the person
+    /// packing, and telling them the bins need somebody is telling them about a
+    /// problem they are creating and cannot solve.
+    ///
+    /// The count is of occurrences nobody is left for. A trip that leaves no
+    /// work behind — the child who is away is the one with no chores that week,
+    /// or the household has already covered them — is not worth a notification,
+    /// and a "somebody is away tomorrow" that arrives when everything is
+    /// already arranged is the reminder that teaches people this one is noise.
+    private func leavingReminders(
+        on day: Date,
+        calendar: Calendar
+    ) -> [Reminder] {
+        guard schedule.sendsAwayReminders,
+            let fireDate = time(schedule.eveningHour, on: day, calendar: calendar),
+            let tomorrow = calendar.date(byAdding: .day, value: 1, to: day)
+        else { return [] }
+
+        // Trips that start tomorrow, not trips that merely run through it. A
+        // household told every evening of a fortnight that somebody is away
+        // tomorrow has been told nothing on thirteen of them.
+        let starting = snapshot.awayPeriods.active.filter { $0.firstDay == tomorrow }
+        guard !starting.isEmpty else { return [] }
+
+        return starting.flatMap { trip -> [Reminder] in
+            let uncovered = choresLeftBehind(by: trip, from: tomorrow, calendar: calendar)
+            guard uncovered > 0 else { return [] }
+
+            let who = trip.who(among: snapshot.activeMembers)
+            return snapshot.activeMembers
+                .filter { $0.role.isAdult && !trip.covers($0.id) }
+                .map { adult in
+                    Reminder(
+                        id: identity(adult.id, day, "leaving-\(trip.id)", calendar: calendar),
+                        recipientID: adult.id,
+                        fireDate: fireDate,
+                        title: "\(who) away from tomorrow",
+                        body: Self.leavingBody(who: who, chores: uncovered),
+                        kind: .leavingTomorrow(periodID: trip.id, chores: uncovered)
+                    )
+                }
+        }
+    }
+
+    /// How many occurrences the trip leaves with nobody to do them.
+    ///
+    /// Counted over the trip's own days rather than a fixed window, and stopped
+    /// at a fortnight: the number on the notification is meant to say how much
+    /// is at stake this week, and "eighty-four chores" from a month in Australia
+    /// is a number nobody can act on.
+    private func choresLeftBehind(
+        by trip: AwayPeriod,
+        from firstDay: Date,
+        calendar: Calendar
+    ) -> Int {
+        let horizon =
+            calendar.date(byAdding: .day, value: 13, to: firstDay) ?? firstDay
+        let lastDay = min(trip.lastDay, horizon)
+        guard firstDay <= lastDay else { return 0 }
+
+        var total = 0
+        var cursor = firstDay
+        while cursor <= lastDay {
+            total += snapshot.agenda(for: cursor)
+                .count { $0.needsSomebodyElse }
+            guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+            cursor = next
+        }
+        return total
+    }
+
     /// Drops the reminders that ask something of somebody who is not here.
     ///
     /// Applied before the per-person cap rather than after, so that a family on
@@ -925,6 +1032,18 @@ extension ReminderPlanner {
             + (others == 1
                 ? " 1 other reward is owed too."
                 : " \(others) other rewards are owed too.")
+    }
+
+    /// Names who is going and how much work they are leaving with nobody.
+    ///
+    /// The count is what makes this actionable rather than informative. "Sam is
+    /// away from tomorrow" is something the person who arranged the trip
+    /// already knows; "Sam is away from tomorrow — 6 chores have nobody" is a
+    /// thing to do this evening.
+    static func leavingBody(who: String, chores: Int) -> String {
+        chores == 1
+            ? "\(who) away from tomorrow. 1 chore has nobody."
+            : "\(who) away from tomorrow. \(chores) chores have nobody."
     }
 
     /// Names the chore and the number, because that is the whole reason this

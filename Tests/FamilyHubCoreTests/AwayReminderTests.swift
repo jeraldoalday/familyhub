@@ -177,6 +177,110 @@ struct AwayReminderTests {
         #expect(!Reminder.Kind.cookingTonight(mealID: Identifier()).survivesBeingAway)
     }
 
+    // MARK: The evening before
+
+    private func leaving(_ reminders: [Reminder]) -> [Reminder] {
+        reminders.filter {
+            if case .leavingTomorrow = $0.kind { return true }
+            return false
+        }
+    }
+
+    @Test("The evening before a trip, the adults are told what has nobody")
+    func adultsAreWarnedTheEveningBefore() throws {
+        var fixture = try makeFixture()
+        fixture.snapshot.awayPeriods = [
+            try trip(fixture, members: [fixture.sam.id], from: 1, to: 3)
+        ]
+
+        let tonight = leaving(reminders(fixture))
+        #expect(tonight.map(\.recipientID) == [fixture.mary.id])
+        // Three days of a daily chore with nobody left for it.
+        #expect(
+            tonight.first?.kind
+                == .leavingTomorrow(
+                    periodID: fixture.snapshot.awayPeriods[0].id, chores: 3))
+        #expect(tonight.first?.body == "Sam away from tomorrow. 3 chores have nobody.")
+    }
+
+    @Test("A child is not asked to reorganise the week")
+    func childrenAreNotWarned() throws {
+        var fixture = try makeFixture()
+        fixture.snapshot.awayPeriods = [
+            try trip(fixture, members: [fixture.sam.id], from: 1, to: 3)
+        ]
+
+        #expect(!leaving(reminders(fixture)).contains { $0.recipientID == fixture.sam.id })
+    }
+
+    @Test("The adult who is packing is not told about the problem they are creating")
+    func theOneLeavingIsNotWarned() throws {
+        var fixture = try makeFixture()
+        // Mary is the only adult, and she is the one going.
+        fixture.snapshot.awayPeriods = [
+            try trip(fixture, members: [fixture.mary.id], from: 1, to: 3)
+        ]
+
+        #expect(leaving(reminders(fixture)).isEmpty)
+    }
+
+    @Test("It is sent the evening before, not every evening of the fortnight")
+    func onlyTheEveningBefore() throws {
+        var fixture = try makeFixture()
+        fixture.snapshot.awayPeriods = [
+            try trip(fixture, members: [fixture.sam.id], from: 1, to: 5)
+        ]
+
+        #expect(leaving(reminders(fixture, dayOffset: 0)).count == 1)
+        #expect(leaving(reminders(fixture, dayOffset: 1)).isEmpty)
+        #expect(leaving(reminders(fixture, dayOffset: 2)).isEmpty)
+        // And not days ahead of time either.
+        #expect(leaving(reminders(fixture, dayOffset: -1)).isEmpty)
+    }
+
+    @Test("A trip that leaves no work behind is not worth a notification")
+    func nothingUncoveredIsNotSent() throws {
+        var fixture = try makeFixture()
+        // Sam's chore is archived, so his being away leaves nothing at all.
+        fixture.snapshot.chores = [fixture.bins.archived(at: clock.now)]
+        fixture.snapshot.awayPeriods = [
+            try trip(fixture, members: [fixture.sam.id], from: 1, to: 3)
+        ]
+
+        #expect(leaving(reminders(fixture)).isEmpty)
+    }
+
+    @Test("A household that has switched it off is not told")
+    func theWarningCanBeSwitchedOff() throws {
+        var fixture = try makeFixture()
+        fixture.snapshot.awayPeriods = [
+            try trip(fixture, members: [fixture.sam.id], from: 1, to: 3)
+        ]
+
+        let quiet = ReminderSchedule(sendsAwayReminders: false)
+        let planned = ReminderPlanner(snapshot: fixture.snapshot, schedule: quiet)
+            .reminders(for: clock.today, now: clock.now)
+        #expect(leaving(planned).isEmpty)
+    }
+
+    @Test("A schedule saved before the switch existed keeps sending it")
+    func olderSchedulesDefaultToOn() throws {
+        let json = Data(#"{"morningHour":8,"eveningHour":19}"#.utf8)
+        let decoded = try JSONDecoder().decode(ReminderSchedule.self, from: json)
+        #expect(decoded.sendsAwayReminders)
+    }
+
+    @Test("The warning outranks the cook and yields to the person waiting on an answer")
+    func warningSitsBetweenCoverAndCooking() {
+        let leaving = Reminder.Kind.leavingTomorrow(periodID: Identifier(), chores: 3)
+        #expect(
+            leaving.priority
+                < Reminder.Kind.coverRequested(requestID: Identifier(), others: 0).priority
+        )
+        #expect(leaving.priority > Reminder.Kind.cookingTonight(mealID: Identifier()).priority)
+        #expect(!leaving.survivesBeingAway)
+    }
+
     // MARK: What comes back
 
     @Test("The day after they get home, the phone starts asking again")
