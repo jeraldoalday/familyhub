@@ -13,6 +13,8 @@ in one native iOS/iPadOS app.
 
 ---
 
+> **How this project is built:** I develop this app with AI coding agents. I decide how chores, points, and rewards should work, review each change and its tests, and merge what holds up.
+
 ## Why this architecture
 
 The business rules of a household organizer are surprisingly subtle — recurrence
